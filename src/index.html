@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Leather CAD</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="toolbar">
+
+    </div>
+
+    <div id="toolIndicator"></div>
+    <div id="snapMenu" style="margin: 8px 0; display: flex; gap: 5px; justify-self: center;">
+        <button data-snap="grid" id="gridSnap" class="snapBtn">Grid</button>
+        <button data-snap="nodes" id="nodesSnap" class="snapBtn">Nodes</button>
+        <button data-snap="guide" id="guideSnap" class="snapBtn">Guide</button>
+    </div>
+    <div id="splashOverlay">
+        <div id="splashCard">
+
+            <div id="splashTop">
+                <img src="../assets/images/splash.png" alt="Splash">
+            </div>
+
+            <div id="splashBottom">
+                <div class="splash-actions">
+                    <button id="newFileBtn">New File</button>
+                    <button id="openFileBtn">Open File</button>
+                </div>
+
+                <div class="recent-files">
+                    <h3>Recent Files</h3>
+                    <ul id="recentList"></ul>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="preferencesModal" class="modal hidden">
+        <div class="prefs-container">
+
+            <!-- Sidebar -->
+            <div class="prefs-sidebar">
+                <div class="tab active" data-tab="general">General</div>
+                <div class="tab" data-tab="document">Document</div>
+                <div class="tab" data-tab="view">View</div>
+            </div>
+
+            <!-- Content -->
+            <div class="prefs-content">
+
+                <!-- GENERAL -->
+                <div class="tab-panel active" id="general">
+                    <h2>General</h2>
+
+                    <label>
+                        <input type="checkbox" id="darkModeToggle">
+                        Dark Mode
+                    </label>
+                </div>
+
+                <!-- DOCUMENT -->
+                <div class="tab-panel" id="document">
+                    <h2>Page Setup</h2>
+
+                    <label>Page Type:</label>
+                    <select id="pageType">
+                        <option value="letter">Letter (8.5 x 11 in)</option>
+                        <option value="a4">A4 (210 x 297 mm)</option>
+                        <option value="custom">Custom</option>
+                    </select>
+
+                    <div id="customSize" style="margin-top:10px;">
+                        Width: <input type="number" id="pageWidth">
+                        Height: <input type="number" id="pageHeight">
+                    </div>
+
+                    <h3>Units</h3>
+                    <select id="unitsSelect">
+                        <option value="in">Inches</option>
+                        <option value="mm">Millimeters</option>
+                    </select>
+                </div>
+
+                <!-- VIEW -->
+                <div class="tab-panel" id="view">
+                    <h2>View</h2>
+                    <p>Future stuff (grid, colors, etc.)</p>
+                </div>
+
+                <button id="closePrefs">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="cadCanvas"></canvas>
+
+    <div id="coordinateInput"
+        style="position:fixed; bottom:5px; left:50%; transform:translateX(-50%); display:none; background:#333; padding:5px; border-radius:4px;">
+        X (U): <input type="number" id="inputX" style="width:60px">
+        Y (U): <input type="number" id="inputY" style="width:60px">
+    </div>
+
+    <div id="dynamicNumberInput"
+        style="position:fixed; bottom:5px; left:50%; transform:translateX(-50%); display:none; background:#333; padding:5px; border-radius:4px;">
+        <label id="dynamicLabel">Value:</label>
+        <input type="number" id="dynamicInput" style="width:80px">
+    </div>
+
+    <script src="geometry.js"></script>
+    <script src="renderer.js"></script>
+</body>
+
+</html>

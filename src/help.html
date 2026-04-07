@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>LeatherCAD Documentation</title>
+
+    <style>
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            margin: 40px;
+            background: #f4efe9;
+            color: #2b2b2b;
+            line-height: 1.6;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #3a2f25;
+        }
+
+        h1 {
+            border-bottom: 3px solid #8b5e3c;
+            padding-bottom: 10px;
+        }
+
+        section {
+            margin-bottom: 40px;
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+            border-left: 6px solid #8b5e3c;
+        }
+
+        code {
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .key {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 2px;
+            background: #e0d6cc;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        .brand {
+            color: #8b5e3c;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>LeatherCAD Documentation</h1>
+
+    <section>
+        <h2>Welcome to <span class="brand">LeatherCAD</span></h2>
+        <p>
+            LeatherCAD is a precision 2D design tool built specifically for leatherworkers.
+            Create clean patterns, control measurements, and refine geometry with tools designed
+            for real-world crafting.
+        </p>
+
+        <p>
+            Whether you're laying out a wallet, belt, or custom pattern — LeatherCAD keeps your workflow fast and
+            accurate.
+        </p>
+    </section>
+
+    <section>
+        <h2>Core Workflow</h2>
+
+        <ul>
+            <li>Create geometry (lines, shapes)</li>
+            <li>Refine using snapping and guides</li>
+            <li>Select and adjust nodes</li>
+            <li>Export or print your pattern</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Mouse Controls</h2>
+
+        <ul>
+            <li><b>Left Click:</b> Place points or select nodes</li>
+            <li><b>Click + Drag:</b> Box select or create shapes</li>
+            <li><b>Double Click:</b> Select full edge/path</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Keyboard Essentials</h2>
+
+        <ul>
+            <li><span class="key">Esc</span> Cancel current action</li>
+            <li><span class="key">Enter</span> Finish line / shape</li>
+            <li><span class="key">Shift</span> Enable snapping + multi-select</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Tools</h2>
+
+        <ul>
+            <li><b>L</b> → Line tool (pattern edges)</li>
+            <li><b>R</b> → Rectangle (panels, pockets)</li>
+            <li><b>C</b> → Circle (holes, rounded cuts)</li>
+            <li><b>N</b> → Node tool (fillet / edge smoothing)</li>
+            <li><b>Space</b> → Selection tool</li>
+        </ul>
+
+        <p>
+            Each tool is designed to match common leather pattern tasks.
+        </p>
+
+    </section>
+
+    <section>
+        <h2>Selection & Editing</h2>
+
+        <ul>
+            <li>Click a node to select it</li>
+            <li><span class="key">Shift</span> + Click for multi-select</li>
+            <li>Drag to box select multiple nodes</li>
+            <li><span class="key">A</span> Select all</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Move (Transform)</h2>
+
+        <ul>
+            <li>Select nodes</li>
+            <li>Press <span class="key">G</span> to move</li>
+            <li>Move mouse to adjust</li>
+            <li>Click to confirm placement</li>
+            <li><span class="key">Esc</span> cancels movement</li>
+        </ul>
+
+        <p><b>Axis Lock:</b></p>
+        <ul>
+            <li><span class="key">X</span> Lock horizontal movement</li>
+            <li><span class="key">Y</span> Lock vertical movement</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Snapping</h2>
+
+        <ul>
+            <li>Hold <span class="key">Shift</span> to enable snapping</li>
+            <li>Snap to:
+                <ul>
+                    <li>Grid (consistent spacing)</li>
+                    <li>Nodes (precise joins)</li>
+                    <li>Guides (layout alignment)</li>
+                </ul>
+            </li>
+        </ul>
+
+        <p>
+            Snapping helps ensure clean joins and accurate measurements — critical for pattern cutting.
+        </p>
+
+    </section>
+
+    <section>
+        <h2>Guides</h2>
+
+        <ul>
+            <li><span class="key">H</span> Horizontal guide</li>
+            <li><span class="key">V</span> Vertical guide</li>
+            <li>Drag guides to reposition</li>
+        </ul>
+
+        <p>
+            Use guides to plan stitch lines, spacing, and alignment before committing geometry.
+        </p>
+
+    </section>
+
+    <section>
+        <h2>Node Tool (Edge Rounding / Fillet)</h2>
+
+        <ul>
+            <li>Select Node tool (<span class="key">N</span>)</li>
+            <li>Click a corner node</li>
+            <li>Drag to create a rounded edge</li>
+            <li>Release to apply</li>
+        </ul>
+
+        <p>
+            Perfect for smoothing corners on wallets, straps, and panels.
+        </p>
+
+    </section>
+
+    <section>
+        <h2>File & Output</h2>
+
+        <ul>
+            <li><b>New:</b> Start fresh pattern</li>
+            <li><b>Open:</b> Load saved design</li>
+            <li><b>Save As:</b> Export pattern file</li>
+            <li><b>Print:</b> Print full-scale pattern</li>
+        </ul>
+
+        <p>
+            Patterns are designed to print at accurate real-world scale.
+        </p>
+
+    </section>
+
+    <section>
+        <h2>Undo / Redo</h2>
+
+        <ul>
+            <li><span class="key">Ctrl</span> + <span class="key">Z</span> Undo</li>
+            <li><span class="key">Ctrl</span> + <span class="key">Shift</span> + <span class="key">Z</span> Redo</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>Workflow Tips</h2>
+
+        <ul>
+            <li>Use guides before drawing complex layouts</li>
+            <li>Snap to nodes to avoid tiny gaps in patterns</li>
+            <li>Round corners early for cleaner designs</li>
+            <li>Use move tool for precise adjustments instead of redrawing</li>
+            <li>Press <span class="key">Esc</span> multiple times to fully exit actions</li>
+        </ul>
+
+    </section>
+
+    <section>
+        <h2>About LeatherCAD</h2>
+
+        <p>
+            LeatherCAD is built for makers who want precision without complexity.
+            Focused on pattern design, it removes unnecessary CAD overhead and keeps you in control of your craft.
+        </p>
+
+    </section>
+
+</body>
+
+</html>

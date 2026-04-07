@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+out/
+
+*.wasm
+*.o
+*.a
+
+.DS_Store
+Thumbs.db
