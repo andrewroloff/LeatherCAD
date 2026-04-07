@@ -1,5 +1,5 @@
 const { ipcRenderer } = require('electron');
-const fs = require('fs');
+// const fs = require('fs');
 
 let recentFiles = [];
 
@@ -55,7 +55,11 @@ const dynamicDiv = document.getElementById("dynamicNumberInput");
 let currentContext = null; // "node", "hGuide", "vGuide"
 let activeObject = null;   // reference to node or guide being edited
 
-
+let toolingCanvas = document.getElementById("toolingCanvas");
+let toolingCtx = toolingCanvas.getContext("2d");
+let isDrawing = false;
+let currentStroke = [];
+let simplify = true;
 
 // fit window better
 function resizeWindow() {
@@ -97,6 +101,8 @@ ipcRenderer.on('setting-updated', (event, key, value) => {
 ipcRenderer.on('set-workspace', (event, mode) => {
     console.log('Switching workspace to:', mode);
     currentWorkspace = mode;
+    if (currentWorkspace === 'tooling') showToolingWorkspace();
+    if (currentWorkspace === 'pattern') showPatternWorkspace();
     // update UI accordingly
 });
 
@@ -410,6 +416,17 @@ let boxEnd = null;
 let lastClickTime = 0;
 
 // ---------------- Helpers ----------------
+function showToolingWorkspace() {
+    document.getElementById("patternWorkspace").classList.add("hidden");
+    document.getElementById("toolingWorkspace").classList.remove("hidden");
+    resizeToolingCanvas();
+}
+
+function showPatternWorkspace() {
+    document.getElementById("toolingWorkspace").classList.add("hidden");
+    document.getElementById("patternWorkspace").classList.remove("hidden");
+}
+
 function updateGhostSnap(mousePos) {
     ghostSnap = null;
     if (snapEnabled && doc) {
@@ -2019,6 +2036,203 @@ function loadPattern(file) {
         }
     };
     reader.readAsText(file);
+}
+
+// ---------------- TOOLING ----------------
+
+function resizeToolingCanvas() {
+    const canvas = document.getElementById("toolingCanvas");
+    const rect = canvas.getBoundingClientRect();
+
+    // Set actual pixel width & height
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+
+    // Scale the context so drawing stays correct
+    const ctx = canvas.getContext("2d");
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+
+// Call once on load
+window.addEventListener("load", resizeToolingCanvas);
+window.addEventListener("resize", resizeToolingCanvas);
+
+let ToolingRef = null;
+let ToolingReady = false;
+
+ToolingModule().then((Module) => {
+    ToolingRef = Module;
+    ToolingReady = true;
+    console.log("Tooling engine ready!");
+});
+
+// ---------------- POINTER EVENTS ----------------
+
+toolingCanvas.addEventListener("pointerdown", (e) => {
+    if (!ToolingReady) return;
+    isDrawing = true;
+    currentStroke = [{ x: e.offsetX, y: e.offsetY }];
+});
+
+toolingCanvas.addEventListener("pointermove", (e) => {
+    if (!isDrawing) return;
+    const point = { x: e.offsetX, y: e.offsetY };
+    currentStroke.push(point);
+
+    const prev = currentStroke[currentStroke.length - 2];
+    toolingCtx.strokeStyle = "#ffd166";
+    toolingCtx.lineWidth = 2;
+    toolingCtx.beginPath();
+    toolingCtx.moveTo(prev.x, prev.y);
+    toolingCtx.lineTo(point.x, point.y);
+    toolingCtx.stroke();
+});
+
+toolingCanvas.addEventListener("pointerup", () => {
+    if (!isDrawing) return;
+    isDrawing = false;
+    if (!ToolingReady) return;
+    if (currentStroke.length < 2) return;
+
+    // Push stroke for undo
+    pushStroke(currentStroke);
+
+    // Prepare data for WASM
+    let pts = new Float64Array(currentStroke.length * 2);
+    currentStroke.forEach((p, i) => {
+        pts[i * 2] = p.x;
+        pts[i * 2 + 1] = p.y;
+    });
+
+    // Allocate memory
+    let ptr = ToolingRef._malloc(pts.length * pts.BYTES_PER_ELEMENT);
+    ToolingRef.HEAPF64.set(pts, ptr / 8);
+
+    // Call WASM to process stroke into points/lines
+    ToolingRef.ccall("process_stroke", "void", ["number", "number"], [ptr, pts.length]);
+
+    // Clear current stroke after processing
+    currentStroke = [];
+
+    // Redraw from WASM lines
+    redrawToolingCanvas();
+});
+
+// ---------------- CLEAR / SIMPLIFY ----------------
+
+document.getElementById("clearCanvasBtn").addEventListener("click", () => {
+    if (!ToolingReady) return;
+    ToolingRef.ccall("clear_scene");
+    toolingCtx.clearRect(0, 0, toolingCanvas.width, toolingCanvas.height);
+});
+
+document.getElementById("enableSimplify").addEventListener("change", (e) => {
+    simplify = e.target.checked;
+});
+
+// ---------------- DRAWING ----------------
+
+function redrawToolingCanvas() {
+    if (!ToolingReady) return;
+
+    toolingCtx.clearRect(0, 0, toolingCanvas.width, toolingCanvas.height);
+
+    const lineCount = ToolingRef.ccall("get_line_count", "number");
+    if (lineCount === 0) return;
+
+    const ptr = ToolingRef.ccall("get_lines_buffer", "number");
+    const lines = new Float64Array(ToolingRef.HEAPF64.buffer, ptr, lineCount * 4);
+
+    toolingCtx.strokeStyle = "#06d6a0";
+    toolingCtx.lineWidth = 2;
+
+    for (let i = 0; i < lineCount; i++) {
+        toolingCtx.beginPath();
+        toolingCtx.moveTo(lines[i * 4 + 0], lines[i * 4 + 1]);
+        toolingCtx.lineTo(lines[i * 4 + 2], lines[i * 4 + 3]);
+        toolingCtx.stroke();
+    }
+
+    // Optional: free buffer in C++
+    ToolingRef.ccall("free_lines_buffer");
+}
+
+// ---------------- EXPORT ----------------
+
+document.getElementById("exportToCADBtn").addEventListener("click", () => {
+    if (!ToolingReady) return;
+
+    const lineCount = ToolingRef.ccall("get_line_count", "number");
+    if (lineCount === 0) return;
+
+    const ptr = ToolingRef.ccall("get_lines_buffer", "number");
+    const lines = new Float64Array(ToolingRef.HEAPF64.buffer, ptr, lineCount * 4);
+
+    if (window.mainCAD && mainCAD.addLines) {
+        const exportLines = [];
+        for (let i = 0; i < lineCount; i++) {
+            exportLines.push([
+                lines[i * 4 + 0], lines[i * 4 + 1],
+                lines[i * 4 + 2], lines[i * 4 + 3]
+            ]);
+        }
+        mainCAD.addLines(exportLines);
+    }
+
+    ToolingRef.ccall("free_lines_buffer");
+});
+
+// ---------------- UNDO / REDO ----------------
+
+let toolingUndoStack = [];
+let toolingRedoStack = [];
+
+function pushStroke(stroke) {
+    toolingUndoStack.push(stroke);
+    toolingRedoStack.length = 0; // clear redo on new action
+
+    // Add to WASM
+    addStrokeToWASM(stroke);
+}
+
+function addStrokeToWASM(stroke) {
+    if (!ToolingReady) return;
+    let pts = new Float64Array(stroke.length * 2);
+    stroke.forEach((p, i) => {
+        pts[i * 2] = p.x;
+        pts[i * 2 + 1] = p.y;
+    });
+
+    let ptr = ToolingRef._malloc(pts.length * pts.BYTES_PER_ELEMENT);
+    ToolingRef.HEAPF64.set(pts, ptr / 8);
+    ToolingRef.ccall("process_stroke", "void", ["number", "number"], [ptr, pts.length]);
+    // no _free needed
+}
+
+function toolingUndo() {
+    if (!toolingUndoStack.length) return;
+    const stroke = toolingUndoStack.pop();
+    toolingRedoStack.push(stroke);
+
+    // Clear WASM scene
+    ToolingRef.ccall("clear_scene");
+
+    // Re-add all remaining strokes
+    toolingUndoStack.forEach(addStrokeToWASM);
+    redrawToolingCanvas();
+}
+
+function toolingRedo() {
+    if (!toolingRedoStack.length) return;
+    const stroke = toolingRedoStack.pop();
+    toolingUndoStack.push(stroke);
+
+    // Clear WASM scene
+    ToolingRef.ccall("clear_scene");
+
+    // Re-add all strokes
+    toolingUndoStack.forEach(addStrokeToWASM);
+    redrawToolingCanvas();
 }
 
 // ---------------- Init ----------------

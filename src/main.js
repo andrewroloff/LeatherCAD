@@ -179,7 +179,7 @@ app.whenReady().then(() => {
         {
             label: 'Workspace',
             submenu: [
-                { label: 'Template Mode', click: () => mainWindow.webContents.send('set-workspace', 'template') },
+                { label: 'Pattern Mode', click: () => mainWindow.webContents.send('set-workspace', 'pattern') },
                 { label: 'Tooling Mode', click: () => mainWindow.webContents.send('set-workspace', 'tooling') }
             ]
         },

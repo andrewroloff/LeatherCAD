@@ -17,6 +17,10 @@ struct Line
 static std::vector<Point> points;
 static std::vector<Line> lines;
 
+// Temporary buffer for JS access
+static double *lineBuffer = nullptr;
+static size_t lineBufferSize = 0;
+
 // ---------------- HELPERS ----------------
 
 static double dist(const Point &a, const Point &b)
@@ -32,12 +36,9 @@ static bool is_line(const std::vector<Point> &stroke)
         return false;
 
     double straight = dist(stroke.front(), stroke.back());
-
     double path = 0;
     for (size_t i = 1; i < stroke.size(); i++)
-    {
         path += dist(stroke[i - 1], stroke[i]);
-    }
 
     return (path - straight) < 5.0; // tolerance
 }
@@ -77,24 +78,17 @@ extern "C"
     {
         double dx = b.x - a.x;
         double dy = b.y - a.y;
-
         if (dx == 0 && dy == 0)
-        {
             return dist(p, a);
-        }
 
         double t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
-
         double projX = a.x + t * dx;
         double projY = a.y + t * dy;
-
         double px = p.x - projX;
         double py = p.y - projY;
-
         return std::sqrt(px * px + py * py);
     }
 
-    // Iterative RDP (stack-based)
     static std::vector<Point> rdp(const std::vector<Point> &input, double epsilon)
     {
         if (input.size() < 3)
@@ -135,39 +129,27 @@ extern "C"
 
         std::vector<Point> output;
         for (size_t i = 0; i < input.size(); i++)
-        {
             if (keep[i])
-            {
                 output.push_back(input[i]);
-            }
-        }
-
         return output;
     }
 
     // ---------------- STROKE INPUT ----------------
-    // pts = [x0,y0,x1,y1,...]
     EMSCRIPTEN_KEEPALIVE
     void process_stroke(double *pts, int count)
     {
         std::vector<Point> stroke;
-
         for (int i = 0; i < count; i += 2)
-        {
             stroke.push_back({pts[i], pts[i + 1]});
-        }
 
         if (stroke.size() < 2)
             return;
 
-        // 🔥 STEP 1: Simplify stroke
-        double epsilon = 5.0; // tweak this
+        double epsilon = 5.0;
         std::vector<Point> simplified = rdp(stroke, epsilon);
-
         if (simplified.size() < 2)
             return;
 
-        // 🔥 STEP 2: Detect line using simplified points
         if (is_line(simplified))
         {
             int p1 = create_point(simplified.front().x, simplified.front().y);
@@ -176,9 +158,7 @@ extern "C"
         }
         else
         {
-            // 🔥 STEP 3: Clean polyline (VERY improved now)
             int prev = create_point(simplified[0].x, simplified[0].y);
-
             for (size_t i = 1; i < simplified.size(); i++)
             {
                 int curr = create_point(simplified[i].x, simplified[i].y);
@@ -190,27 +170,45 @@ extern "C"
 
     // ---------------- OUTPUT ----------------
 
-    // number of lines
     EMSCRIPTEN_KEEPALIVE
     int get_line_count()
     {
         return lines.size();
     }
 
-    // fill buffer: [x1,y1,x2,y2,...]
+    // Allocate internal buffer and return pointer to JS
     EMSCRIPTEN_KEEPALIVE
-    void get_lines(double *out)
+    double *get_lines_buffer()
     {
+        size_t needed = lines.size() * 4;
+        if (needed > lineBufferSize)
+        {
+            delete[] lineBuffer;
+            lineBuffer = new double[needed];
+            lineBufferSize = needed;
+        }
+
         for (size_t i = 0; i < lines.size(); i++)
         {
             Line &l = lines[i];
             Point &a = points[l.p1];
             Point &b = points[l.p2];
-
-            out[i * 4 + 0] = a.x;
-            out[i * 4 + 1] = a.y;
-            out[i * 4 + 2] = b.x;
-            out[i * 4 + 3] = b.y;
+            lineBuffer[i * 4 + 0] = a.x;
+            lineBuffer[i * 4 + 1] = a.y;
+            lineBuffer[i * 4 + 2] = b.x;
+            lineBuffer[i * 4 + 3] = b.y;
         }
+
+        return lineBuffer;
     }
-}
+
+    // Optional: free internal buffer (not required unless you want to reset)
+    EMSCRIPTEN_KEEPALIVE
+    void free_lines_buffer()
+    {
+        delete[] lineBuffer;
+        lineBuffer = nullptr;
+        lineBufferSize = 0;
+    }
+
+} // extern "C"

@@ -35,6 +35,17 @@ body.dark-mode {
   color: var(--text-light);
 }
 
+.workspace {
+  position: absolute;
+  inset: 0;
+  /* full window */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+`
+
 /* -------------------- Toolbar -------------------- */
 #toolbar {
   display: flex;
@@ -221,12 +232,17 @@ body.dark-mode #snapMenu button:hover {
   transition: filter 0.2s;
 }
 
+.icon {
+  filter: brightness(0) invert(0);
+}
+
 body.dark-mode #toolIndicator {
   background: var(--panel-dark);
   border-color: var(--border-dark);
 }
 
-body.dark-mode #toolIndicator img {
+body.dark-mode #toolIndicator img,
+body.dark-mode .icon {
   filter: brightness(0) invert(1);
 }
 
@@ -618,4 +634,71 @@ body.dark-mode #toolIndicator img {
     text-align: center;
     white-space: nowrap;
   }
+}
+
+/* ------------- Tooling ------------------*/
+/* Tooling Workspace */
+#toolingWorkspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+/* Toolbar */
+#toolingToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  /* prevent shrinking */
+}
+
+/* Toolbar buttons */
+#toolingToolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#toolingToolbar button:hover {
+  background: var(--panel-hover);
+}
+
+#toolingToolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+/* Toolbar icons */
+#toolingToolbar .icon {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+/* Canvas */
+#toolingCanvas {
+  flex: 1;
+  /* fill remaining space */
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+
+.workspace.hidden {
+  display: none !important;
 }
