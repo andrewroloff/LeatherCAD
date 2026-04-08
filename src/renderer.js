@@ -1685,6 +1685,8 @@ document.addEventListener('keydown', e => {
         active.closest('#coordinateInput') !== null ||
         active.closest('#dynamicNumberInput') !== null;
 
+    if (currentWorkspace === 'tooling') return;
+
     if (e.ctrlKey && e.key.toLowerCase() === 'c') {
         copySelection();
         e.preventDefault();
@@ -1893,6 +1895,7 @@ inputX.addEventListener('keydown', e => {
         addPointFromInput();
         drawAll();
         e.stopPropagation();
+        inputX.blur();
     } else if (e.key === 'Tab') {
         e.preventDefault();
         inputY.focus();
@@ -1904,6 +1907,7 @@ inputY.addEventListener('keydown', e => {
         addPointFromInput();
         drawAll();
         e.stopPropagation();
+        inputY.blur();
     } else if (e.key === 'Tab') {
         e.preventDefault();
         inputX.focus();
@@ -2122,6 +2126,15 @@ toolingCanvas.addEventListener("pointerup", () => {
 
 document.getElementById("clearCanvasBtn").addEventListener("click", () => {
     if (!ToolingReady) return;
+
+    // Push current state to undo stack
+    const buffer = ToolingRef.ccall("get_lines_buffer", "number");
+    const lineCount = ToolingRef.ccall("get_line_count", "number");
+    const linesCopy = new Float64Array(ToolingRef.HEAPF64.buffer, buffer, lineCount * 4);
+    const snapshot = Array.from(linesCopy);
+    toolingUndoStack.push({ type: "clear", lines: snapshot });
+    toolingRedoStack.length = 0;
+
     ToolingRef.ccall("clear_scene");
     toolingCtx.clearRect(0, 0, toolingCanvas.width, toolingCanvas.height);
 });
@@ -2157,29 +2170,96 @@ function redrawToolingCanvas() {
     ToolingRef.ccall("free_lines_buffer");
 }
 
-// ---------------- EXPORT ----------------
-
-document.getElementById("exportToCADBtn").addEventListener("click", () => {
+// ---------------- Print ----------------
+document.getElementById("toolingPrint").addEventListener("click", () => {
     if (!ToolingReady) return;
 
     const lineCount = ToolingRef.ccall("get_line_count", "number");
     if (lineCount === 0) return;
 
-    const ptr = ToolingRef.ccall("get_lines_buffer", "number");
-    const lines = new Float64Array(ToolingRef.HEAPF64.buffer, ptr, lineCount * 4);
+    // Get lines from WASM
+    const bufferPtr = ToolingRef.ccall("get_lines_buffer", "number");
+    const lines = new Float64Array(ToolingRef.HEAPF64.buffer, bufferPtr, lineCount * 4);
 
-    if (window.mainCAD && mainCAD.addLines) {
-        const exportLines = [];
-        for (let i = 0; i < lineCount; i++) {
-            exportLines.push([
-                lines[i * 4 + 0], lines[i * 4 + 1],
-                lines[i * 4 + 2], lines[i * 4 + 3]
-            ]);
+    // Compute bounding rectangle
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < lineCount; i++) {
+        const x1 = lines[i * 4], y1 = lines[i * 4 + 1];
+        const x2 = lines[i * 4 + 2], y2 = lines[i * 4 + 3];
+        minX = Math.min(minX, x1, x2);
+        minY = Math.min(minY, y1, y2);
+        maxX = Math.max(maxX, x1, x2);
+        maxY = Math.max(maxY, y1, y2);
+    }
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+
+    // Page size in pixels (assuming 96dpi)
+    const pageSizes = {
+        Letter: { width: 816, height: 1056 }, // 8.5"x11" * 96dpi
+        A4: { width: 794, height: 1123 }      // 210mm x 297mm ~ 96dpi
+    };
+    const pageType = "Letter"; // or read from user selection
+    const page = pageSizes[pageType];
+
+    // Determine scale based on major/minor dimension input
+    const dimInput = document.getElementById("dimInput");
+    const dimUnit = document.getElementById("dimUnit"); // e.g., "px", "mm", "in"
+    let scale = 1;
+    if (dimInput && dimUnit) {
+        const value = parseFloat(dimInput.value);
+        if (!isNaN(value)) {
+            if (dimUnit.value === "width") {
+                scale = value / contentWidth;
+            } else {
+                scale = value / contentHeight;
+            }
         }
-        mainCAD.addLines(exportLines);
     }
 
-    ToolingRef.ccall("free_lines_buffer");
+    // Create offscreen canvas for printing
+    const printCanvas = document.createElement("canvas");
+    printCanvas.width = page.width;
+    printCanvas.height = page.height;
+    const ctx = printCanvas.getContext("2d");
+
+    // White background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, printCanvas.width, printCanvas.height);
+
+    // Center content
+    const offsetX = (page.width - contentWidth * scale) / 2 - minX * scale;
+    const offsetY = (page.height - contentHeight * scale) / 2 - minY * scale;
+
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < lineCount; i++) {
+        const x1 = lines[i * 4] * scale + offsetX;
+        const y1 = lines[i * 4 + 1] * scale + offsetY;
+        const x2 = lines[i * 4 + 2] * scale + offsetX;
+        const y2 = lines[i * 4 + 3] * scale + offsetY;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    // Open new window and append canvas as image
+    const dataUrl = printCanvas.toDataURL();
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const img = printWindow.document.createElement("img");
+    img.src = dataUrl;
+    img.style.width = "100%";
+    img.style.height = "auto";
+    printWindow.document.body.style.margin = "0";
+    printWindow.document.body.appendChild(img);
+
+    setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+    }, 100);
 });
 
 // ---------------- UNDO / REDO ----------------
@@ -2214,11 +2294,17 @@ function toolingUndo() {
     const stroke = toolingUndoStack.pop();
     toolingRedoStack.push(stroke);
 
-    // Clear WASM scene
-    ToolingRef.ccall("clear_scene");
+    if (stroke.type === "clear") {
+        // restore previous lines in WASM
+        ToolingRef.ccall("clear_scene");
+        const linesArray = stroke.lines;
+        for (let i = 0; i < linesArray.length; i += 4) {
+            const p1 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i], linesArray[i + 1]]);
+            const p2 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i + 2], linesArray[i + 3]]);
+            ToolingRef.ccall("create_line", "number", ["number", "number"], [p1, p2]);
+        }
+    }
 
-    // Re-add all remaining strokes
-    toolingUndoStack.forEach(addStrokeToWASM);
     redrawToolingCanvas();
 }
 

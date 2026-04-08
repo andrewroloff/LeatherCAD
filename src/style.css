@@ -44,8 +44,6 @@ body.dark-mode {
   background: var(--bg);
 }
 
-`
-
 /* -------------------- Toolbar -------------------- */
 #toolbar {
   display: flex;

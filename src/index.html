@@ -120,10 +120,28 @@
                     style="width:24px;height:24px;"></button>
             <button id="toolingRedo" onclick="toolingRedo()"><img class="icon" src="../assets/icons/redo.png" alt="Redo"
                     style="width:24px;height:24px;"></button>
-            <button id="exportToCADBtn">Export to CAD</button>
             <label>
                 <input type="checkbox" id="enableSimplify"> Simplify Stroke
             </label>
+            <label>
+                Dimension:
+                <input type="number" id="printDimension" placeholder="Enter size">
+                <select id="printDimensionUnit">
+                    <option value="major">Major</option>
+                    <option value="minor">Minor</option>
+                </select>
+            </label>
+            <label>
+                Page:
+                <select id="pageSize">
+                    <option value="letter">Letter (8.5×11in)</option>
+                    <option value="A4">A4 (210×297mm)</option>
+                </select>
+            </label>
+            <label>
+            </label>
+            <button id="toolingPrint">Print</button>
+
         </div>
         <canvas id="toolingCanvas"></canvas>
     </div>
