@@ -44,6 +44,13 @@
         "tar.gz"
       ],
       "icon": "assets/icons/Linux/512x512.png"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "andrewroloff",
+        "repo": "leatherCAD"
+      }
+    ]
   }
 }
