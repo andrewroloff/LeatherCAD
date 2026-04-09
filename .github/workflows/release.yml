@@ -1,0 +1,46 @@
+name: Build and Release LeatherCAD
+
+on:
+  push:
+    tags:
+      - 'v*'   # triggers on version tags like v1.0.0
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      # 🧠 Install Emscripten
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Build WASM
+        run: npm run build-wasm
+
+      # 🚀 Build distributables
+      - name: Build app
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 📦 Upload artifacts (optional but useful)
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: leathercad-${{ matrix.os }}
+          path: dist/
