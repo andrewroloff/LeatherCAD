@@ -69,10 +69,10 @@ LeatherCAD/
 │  ├─ mac/
 │  └─ linux-unpacked/
 ├─ src/
-├─ main.js
-├─ renderer.js
-├─ drawing.js
-└─ package.json
+|   ├─ main.js
+|   ├─ renderer.js
+|   ├─ drawing.js
+|   └─ package.json
 ```
 
 ## Preparing a Release
@@ -95,7 +95,7 @@ git push origin --tags
 
 ## Contributing
 
-* Rebuild WASM after modifying `src/drawing.cpp`:
+* Rebuild WASM after modifying `cpp/drawing.cpp`, or `cpp/geometry.cpp`:
 
 ```bash
 npm run build-wasm
