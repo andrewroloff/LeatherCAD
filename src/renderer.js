@@ -1,5 +1,5 @@
 const { ipcRenderer } = require('electron');
-// const fs = require('fs');
+const fs = require('fs');
 
 let recentFiles = [];
 
@@ -12,6 +12,9 @@ let gMoveActive = false;
 let gNodes = [];   // array of nodes being moved
 let gOrigin = null; // reference position (mouse at start)
 let gMoveDelta = { dx: 0, dy: 0 };
+
+let gRotateActive = false;
+let gRotateAngle = null;
 
 let PPU = 96;
 
@@ -30,7 +33,10 @@ let spacing = getGridSpacing();
 let multiSelect = false;
 let activeNode = null;
 let filletRadius = 0;
+let filletCancelled = false;
 let visibleDynamicInput = false;
+
+let currentWorkspace = "pattern";
 
 const UNDO_LIMIT = 25;
 let undoStack = [];
@@ -523,6 +529,8 @@ function updateDynamicLabel() {
         dynamicLabel.textContent = 'Y Position';
     } else if (currentContext === 'vGuide') {
         dynamicLabel.textContent = 'X Position';
+    } else if (currentContext === "Rotate") {
+        dynamicLabel.textContent = 'Angle (°)';
     }
 }
 
@@ -649,7 +657,7 @@ function checkGuideSelect(mousePos) {
         if (g.vertical && Math.abs(mousePos.x - g.pos) < guideSelectRadius) {
             selectedGuideIndex = i;
             guideDragActive = true;
-            return true; // stop other mousedown actions
+            return true;
         }
         if (!g.vertical && Math.abs(mousePos.y - g.pos) < guideSelectRadius) {
             selectedGuideIndex = i;
@@ -935,7 +943,7 @@ function snapPoint(x, y) {
         }
     }
 
-    // Self-snaPPUng to the last node of current polyline
+    // Self-snapping to the last node of current polyline
     if (snapEnabled && currentPolyline.length > 0) {
         const last = currentPolyline[currentPolyline.length - 1];
         const dist = Math.hypot(last.x - x, last.y - y);
@@ -1161,7 +1169,7 @@ function drawOverlay() {
         ctx.fill();
     }
 
-    // ---------------- MULTI NODE GHOST ----------------
+    // ---------------- Move ghost ----------------
     if (gMoveActive && gNodes.length > 0) {
         ctx.strokeStyle = '#00f';
         ctx.lineWidth = 2;
@@ -1242,6 +1250,90 @@ function drawOverlay() {
 
         ctx.setLineDash([]);
     }
+
+    // Rotate ghost
+    if (gRotateActive && gNodes.length > 0) {
+        ctx.strokeStyle = '#00f';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+
+        gNodes.forEach(n => {
+            const p = n.polyIndex;
+            const i = n.nodeIndex;
+            const poly = doc.getPolyline(p);
+
+            // Current (moved)
+            const currX = (n.startX - gOrigin.x) * Math.cos(gRotateAngle) - (n.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
+            const currY = (n.startX - gOrigin.x) * Math.sin(gRotateAngle) + (n.startY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
+
+            // -------- PREV --------
+            let prevX = null;
+            let prevY = null;
+
+            if (i > 0) {
+                const prevKey = `${p}:${i - 1}`;
+
+                if (selection.nodes.has(prevKey)) {
+                    // neighbor is ALSO moving → use moved position
+                    const prevNode = gNodes.find(nn =>
+                        nn.polyIndex === p && nn.nodeIndex === i - 1
+                    );
+                    prevX = (prevNode.startX - gOrigin.x) * Math.cos(gRotateAngle) - (prevNode.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
+                    prevY = (prevNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (prevNode.StartY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
+                } else {
+                    // normal case → use real position
+                    const prev = poly.get(i - 1);
+                    prevX = prev.x;
+                    prevY = prev.y;
+                }
+            }
+
+            // -------- NEXT --------
+            let nextX = null;
+            let nextY = null;
+
+            if (i < poly.size() - 1) {
+                const nextKey = `${p}:${i + 1}`;
+
+                if (selection.nodes.has(nextKey)) {
+                    const nextNode = gNodes.find(nn =>
+                        nn.polyIndex === p && nn.nodeIndex === i + 1
+                    );
+                    nextX = (nextNode.startX - gOrigin.x) * Math.cos(gRotateAngle) - (nextNode.StartY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
+                    nextY = (nextNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (nextNode.StartY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
+                } else {
+                    const next = poly.get(i + 1);
+                    nextX = next.x;
+                    nextY = next.y;
+                }
+            }
+
+            // -------- DRAW --------
+            ctx.beginPath();
+
+            if (prevX !== null) {
+                ctx.moveTo(prevX, prevY);
+                ctx.lineTo(currX, currY);
+            }
+
+            if (nextX !== null) {
+                ctx.moveTo(currX, currY);
+                ctx.lineTo(nextX, nextY);
+            }
+
+            ctx.stroke();
+
+            // ghost node
+            ctx.fillStyle = '#00f';
+            ctx.beginPath();
+            ctx.arc(currX, currY, 5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        ctx.setLineDash([]);
+    }
+
+
     // Fillet preview
     if (activeNode && filletRadius > 0) {
         const { polyIndex, nodeIndex } = activeNode;
@@ -1340,8 +1432,8 @@ function finalizePolyline() {
     for (let p of currentPolyline) {
         doc.addNodeToPolyline(id, p.x, p.y);
     }
-
     cancelPolyline();
+    saveState();
 }
 
 function finalizeShape(x2, y2) {
@@ -1370,6 +1462,7 @@ function finalizeShape(x2, y2) {
 
 function cancelPolyline() {
     currentPolyline = [];
+    shapeStart = null;
     mousePos = null;
     coordContainer.style.display = 'none';
     inputX.value = '';
@@ -1402,7 +1495,7 @@ function showDynamicInput(context, object) {
     activeObject = object;
     visibleDynamicInput = true;
     updateDynamicLabel();
-    if (dynamicInput.value === getDynamicValue()) dynamicInput.value = (getDynamicValue() / PPU).toFixed(2);
+    if (dynamicInput.value === getDynamicValue() && currentContext != "Rotate") dynamicInput.value = (getDynamicValue() / PPU).toFixed(2);
     dynamicDiv.style.display = 'block';
     dynamicInput.focus();
 }
@@ -1423,11 +1516,36 @@ dynamicInput.addEventListener('keydown', (e) => {
         const val = parseFloat(dynamicInput.value);
         if (isNaN(val)) return;
 
-        console.log(val);
-
         if (currentContext === 'node') {
-            // Set radius of active node
             activeObject.radius = val;
+            const { polyIndex, nodeIndex } = activeNode;
+            const poly = doc.getPolyline(polyIndex);
+
+            // Safety check
+            if (nodeIndex === 0 || nodeIndex === poly.size() - 1) {
+                activeNode = null;
+                filletRadius = 0;
+                return;
+            }
+
+            const prev = poly.get(nodeIndex - 1);
+            const curr = poly.get(nodeIndex);
+            const next = poly.get(nodeIndex + 1);
+
+            const arcPoints = computeFillet(prev, curr, next, activeObject.radius, 8);
+
+            // Remove the original node
+            doc.removeNodeFromPolyline(polyIndex, nodeIndex);
+
+            // Insert arc points
+            arcPoints.forEach((p, i) => {
+                doc.insertNodeInPolyline(polyIndex, nodeIndex + i, p.x, p.y);
+            });
+
+            activeNode = null;
+            filletRadius = 0;
+            saveState();
+            filletCancelled = true;
             drawAll();
         } else if (currentContext === 'hGuide' && guideDragActive) {
             // Update horizontal guide Y position
@@ -1438,6 +1556,24 @@ dynamicInput.addEventListener('keydown', (e) => {
             // Update vertical guide X position
             doc.moveGuide(selectedGuideIndex, val)
             endGuideDrag();
+            drawAll();
+        } else if (currentContext === 'Rotate' && gRotateActive) {
+            gRotateAngle = val * Math.PI / 180;
+            gNodes.forEach(n => {
+                doc.moveNode(
+                    n.polyIndex,
+                    n.nodeIndex,
+                    (n.startX - gOrigin.x) * Math.cos(gRotateAngle) - (n.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x,
+                    (n.startX - gOrigin.x) * Math.sin(gRotateAngle) + (n.startY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y
+                )
+            });
+
+            gRotateActive = false;
+            gNodes = [];
+            gRotateAngle = 0;
+            ghostSnap = null;
+
+            saveState();
             drawAll();
         }
         hideDynamicInput();
@@ -1505,6 +1641,33 @@ canvas.addEventListener('mousedown', e => {
         return;
     }
 
+    // rotate mode
+    if (gRotateActive && gNodes.length > 0) {
+        gNodes.forEach(n => {
+            doc.moveNode(
+                n.polyIndex,
+                n.nodeIndex,
+                (n.startX - gOrigin.x) * Math.cos(gRotateAngle) - (n.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x,
+                (n.startX - gOrigin.x) * Math.sin(gRotateAngle) + (n.startY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y
+            )
+        });
+
+        gRotateActive = false;
+        gNodes = [];
+        gRotateAngle = 0;
+        ghostSnap = null;
+
+        saveState();
+        drawAll();
+        return;
+    }
+
+    if (currentTool === 'node') {
+        filletCancelled = false;
+        const hit = findNodeAt(e.offsetX, e.offsetY); if (hit) {
+            activeNode = hit; // { polyIndex, nodeIndex }
+        } else { activeNode = null; }
+    }
 
     // ----- Selection Mode -----
     if (currentTool === 'select') {
@@ -1544,6 +1707,10 @@ canvas.addEventListener('mousedown', e => {
     }
 });
 
+window.addEventListener('mousemove', e => {
+    // FIXME: Fix box select
+});
+
 canvas.addEventListener('mousemove', e => {
     // Update current mouse position
     mousePos = { x: e.offsetX, y: e.offsetY };
@@ -1568,6 +1735,12 @@ canvas.addEventListener('mousemove', e => {
         return;
     }
 
+    // rotate
+    if (gRotateActive && gOrigin) {
+        const snap = snapPoint(mousePos.x, mousePos.y);
+        gRotateAngle = Math.atan2(snap.y - gOrigin.y, snap.x - gOrigin.x);
+    }
+
     // drag guide
     if (guideDragActive && selectedGuideIndex !== null) {
         updateGuideDrag(mousePos);
@@ -1583,6 +1756,7 @@ canvas.addEventListener('mousemove', e => {
 
     // -------------- Node Tool ---------------
     if (activeNode && currentTool === 'node' && e.buttons === 1) {
+        if (filletCancelled) return;
         const poly = doc.getPolyline(activeNode.polyIndex);
         const node = poly.get(activeNode.nodeIndex);
         filletRadius = Math.hypot(e.offsetX - node.x, e.offsetY - node.y);
@@ -1602,7 +1776,6 @@ canvas.addEventListener('mouseup', e => {
 
     // Complete box select
     if (isBoxSelecting) {
-        clearSelection();
         const minX = Math.min(boxStart.x, boxEnd.x);
         const maxX = Math.max(boxStart.x, boxEnd.x);
         const minY = Math.min(boxStart.y, boxEnd.y);
@@ -1785,6 +1958,43 @@ document.addEventListener('keydown', e => {
     if (e.key === 'x') gMoveDelta.dy = 0;
     if (e.key === 'y') gMoveDelta.dx = 0;
 
+    // 'r' to rotate
+    if (!typing && e.key.toLowerCase() === 'r') {
+        if (!mousePos) return;
+        const nodes = [];
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        let avgX = 0;
+        let avgY = 0;
+
+        selection.nodes.forEach(key => {
+            const [p, n] = key.split(':').map(Number);
+            const node = doc.getPolyline(p).get(n);
+
+            nodes.push({
+                polyIndex: p,
+                nodeIndex: n,
+
+                startX: node.x,
+                startY: node.y
+            });
+            sumX += node.x;
+            sumY += node.y;
+            count++;
+        });
+        if (count === 0) return;
+        gNodes = nodes;
+        gRotateActive = true;
+
+        avgX = sumX / count;
+        avgY = sumY / count;
+
+        gOrigin = { x: avgX, y: avgY };
+        showDynamicInput("Rotate", selection);
+
+    }
+
 
     // ----- Space for selection tool -----
     if (e.code === 'Space') {
@@ -1815,7 +2025,7 @@ document.addEventListener('keydown', e => {
     }
 
     // escape tools
-    if (!typing && e.key === 'Escape') {
+    if (e.key === 'Escape') {
 
         // Cancel move
         if (gMoveActive) {
@@ -1828,11 +2038,28 @@ document.addEventListener('keydown', e => {
             return;
         }
 
+        // Cancel rotate
+        if (gRotateActive) {
+            gRotateActive = false;
+            gNodes = [];
+            gRotateAngle = null;
+            gOrigin = null;
+            ghostSnap = null;
+            drawAll();
+            return;
+        }
+
         // Cancel guide drag
         if (guideDragActive) {
             endGuideDrag();
             drawAll();
             return;
+        }
+
+        // Cancel node tool
+        if (currentTool === 'Node') {
+            filletCancelled = true;
+            filletRadius = 0;
         }
 
         // Cancel box select
@@ -1852,6 +2079,7 @@ document.addEventListener('keydown', e => {
         // Cancel drawing
         cancelPolyline();
         drawAll();
+        hideDynamicInput();
     }
 
     // ----- Finalize polyline -----
@@ -1866,7 +2094,7 @@ document.addEventListener('keydown', e => {
     if (!typing) {
         switch (e.key.toLowerCase()) {
             case 'l': currentTool = 'line'; break;
-            case 'r': currentTool = 'rectangle'; break;
+            case 't': currentTool = 'rectangle'; break;
             case 'c': currentTool = 'circle'; break;
             case ' ': currentTool = 'select'; break;
             case 'n': currentTool = 'node'; break;
@@ -2067,7 +2295,6 @@ let ToolingReady = false;
 ToolingModule().then((Module) => {
     ToolingRef = Module;
     ToolingReady = true;
-    console.log("Tooling engine ready!");
 });
 
 // ---------------- POINTER EVENTS ----------------

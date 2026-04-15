@@ -1,20 +1,23 @@
 /* -------------------- Base Colors & Variables -------------------- */
 :root {
-  --bg: #f5f5f5;
+  --bg: #f2f2fa;
+  --bg-dark: #3d3e44;
   --panel: #e0e0e0;
-  --panel-dark: #2b2b2b;
+  --panel-dark: #353535;
   --text: #111;
-  --text-light: #ddd;
-  --border: #d0d0d0;
-  --border-dark: #3a3a3a;
-  --accent: #ffd166;
+  --text-light: #C8C8C8;
+  --border: #ffb656;
+  --border-dark: #f5900c;
+  --accent: #f5900c;
   --accent-hover: #ffbf3f;
   --accent-active: #e6a800;
   --shadow-light: rgba(0, 0, 0, 0.12);
   --shadow-medium: rgba(0, 0, 0, 0.18);
   --shadow-heavy: rgba(0, 0, 0, 0.25);
   --grid-light: #ddd;
-  --grid-dark: #333;
+  --grid-dark: #292929;
+  --canvas-bg: #ffffff;
+  --canvas-bg-dark: #555555;
 }
 
 /* -------------------- Body & Layout -------------------- */
@@ -31,7 +34,7 @@ body {
 }
 
 body.dark-mode {
-  background: #111;
+  background: #2e2e2e;
   color: var(--text-light);
 }
 
@@ -42,6 +45,10 @@ body.dark-mode {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+body.dark-mode .workspace {
+  background: var(--bg-dark);
 }
 
 /* -------------------- Toolbar -------------------- */
@@ -87,12 +94,19 @@ body.dark-mode #canvasContainer::before {
 }
 
 canvas {
+
   display: block;
   margin: 0 auto;
+  margin-top: 10px;
   border: 1px solid #666;
   box-shadow: 0 2px 8px var(--shadow-medium);
+  background: var(--canvas-bg);
   cursor: crosshair;
   transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+body.dark-mode canvas {
+  background: var(--canvas-bg-dark);
 }
 
 /* -------------------- Status Bar -------------------- */
@@ -155,8 +169,7 @@ body.dark-mode button:active {
 #snapMenu {
   position: absolute;
   top: 1% !important;
-  left: 5%;
-  transform: translateX(-50%);
+  left: 1%;
   display: flex;
   gap: 6px;
   background: var(--panel);
@@ -204,7 +217,7 @@ body.dark-mode #snapMenu button:hover {
 #toolIndicator {
   position: absolute;
   top: 6% !important;
-  left: 10px;
+  left: 1%;
   width: 46px;
   height: 46px;
   border-radius: 12px;
@@ -655,6 +668,11 @@ body.dark-mode .icon {
   /* prevent shrinking */
 }
 
+body.dark-mode #toolingToolbar {
+  background: var(--panel-dark);
+  border-bottom: var(--border-dark);
+}
+
 /* Toolbar buttons */
 #toolingToolbar button {
   display: flex;
@@ -665,6 +683,11 @@ body.dark-mode .icon {
   background: var(--panel);
   cursor: pointer;
   border-radius: 4px;
+}
+
+body.dark-mode #toolingToolbar button {
+  border: var(--border-dark);
+  background: var(--panel-dark);
 }
 
 #toolingToolbar button:hover {
@@ -694,6 +717,10 @@ body.dark-mode .icon {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+body.dark-mode #toolingCanvas {
+  border: var(--border-dark);
 }
 
 
