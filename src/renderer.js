@@ -1364,7 +1364,14 @@ function addPointFromInput() {
     const rawX = parseFloat(xRaw) * PPU;
     const rawY = parseFloat(yRaw) * PPU;
 
-    const { x, y } = snapPoint(rawX, rawY);
+    const offsetX = shapeStart.x + rawX;
+    const offsetY = shapeStart.y + rawY;
+
+    let { x, y } = snapPoint(rawX, rawY);;
+    if (shapeStart) {
+        x = offsetX;
+        y = offsetY;
+    }
 
     if (currentTool === 'line') {
         if (currentPolyline.length === 0) startPolyline(x, y);
