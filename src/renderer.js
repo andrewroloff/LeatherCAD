@@ -1708,8 +1708,37 @@ canvas.addEventListener('mousedown', e => {
 });
 
 window.addEventListener('mousemove', e => {
-    // FIXME: Fix box select
+    mousePos = {
+        x: e.clientX - canvas.getBoundingClientRect().left,
+        y: e.clientY - canvas.getBoundingClientRect().top
+    }
+    if (isBoxSelecting && boxStart) {
+        boxEnd = { ...mousePos };
+        drawAll();
+    }
 });
+
+window.addEventListener('mouseup', e => {
+    // Complete box select
+    if (isBoxSelecting) {
+        const minX = Math.min(boxStart.x, boxEnd.x);
+        const maxX = Math.max(boxStart.x, boxEnd.x);
+        const minY = Math.min(boxStart.y, boxEnd.y);
+        const maxY = Math.max(boxStart.y, boxEnd.y);
+
+        for (let i = 0; i < doc.entityCount(); i++) {
+            const poly = doc.getPolyline(i);
+            for (let j = 0; j < poly.size(); j++) {
+                const n = poly.get(j);
+                if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
+                    selection.nodes.add(`${i}:${j}`);
+                }
+            }
+        }
+        isBoxSelecting = false;
+        drawAll();
+    }
+})
 
 canvas.addEventListener('mousemove', e => {
     // Update current mouse position
@@ -1748,12 +1777,6 @@ canvas.addEventListener('mousemove', e => {
         drawAll();
     }
 
-    // ---------------- Box select ----------------
-    if (isBoxSelecting && boxStart) {
-        boxEnd = { ...mousePos };
-        drawAll();
-    }
-
     // -------------- Node Tool ---------------
     if (activeNode && currentTool === 'node' && e.buttons === 1) {
         if (filletCancelled) return;
@@ -1773,26 +1796,6 @@ canvas.addEventListener('mouseup', e => {
     const y = e.offsetY;
 
     endGuideDrag();
-
-    // Complete box select
-    if (isBoxSelecting) {
-        const minX = Math.min(boxStart.x, boxEnd.x);
-        const maxX = Math.max(boxStart.x, boxEnd.x);
-        const minY = Math.min(boxStart.y, boxEnd.y);
-        const maxY = Math.max(boxStart.y, boxEnd.y);
-
-        for (let i = 0; i < doc.entityCount(); i++) {
-            const poly = doc.getPolyline(i);
-            for (let j = 0; j < poly.size(); j++) {
-                const n = poly.get(j);
-                if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
-                    selection.nodes.add(`${i}:${j}`);
-                }
-            }
-        }
-        isBoxSelecting = false;
-        drawAll();
-    }
 
     // Complete drag-based rectangle/circle
     if (isDrawingShape && shapeStart) {
