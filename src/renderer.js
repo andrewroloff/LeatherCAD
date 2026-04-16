@@ -100,6 +100,10 @@ ipcRenderer.on('setting-updated', (event, key, value) => {
     if (key === 'page' || key === 'units') {
         ipcRenderer.invoke('get-settings').then(applyDocumentSettings);
     }
+
+    if (key === 'theme') {
+
+    }
 });
 
 
@@ -309,6 +313,7 @@ ipcRenderer.on('about', () => {
 
 const prefsModal = document.getElementById('preferencesModal');
 const darkToggle = document.getElementById('darkModeToggle');
+const themeSelect = document.getElementById('themeSelect');
 
 ipcRenderer.on('open-preferences', async () => {
     prefsModal.classList.remove('hidden');
@@ -325,6 +330,9 @@ ipcRenderer.on('open-preferences', async () => {
     pageType.value = settings.page.type;
     pageWidth.value = settings.page.width;
     pageHeight.value = settings.page.height;
+
+    // Theme
+    themeSelect.value = settings.theme;
 
     updateCustomVisibility();
 });
@@ -376,6 +384,11 @@ darkToggle.addEventListener('change', () => {
     ipcRenderer.send('set-setting', 'darkMode', darkToggle.checked);
 });
 
+themeSelect.addEventListener("change", (e) => {
+    setTheme(e.target.value);
+    ipcRenderer.send('set-setting', 'theme', e.target.value);
+});
+
 // ---------------------- UI -----------------------
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -422,6 +435,11 @@ let boxEnd = null;
 let lastClickTime = 0;
 
 // ---------------- Helpers ----------------
+function setTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+}
+
 function showToolingWorkspace() {
     document.getElementById("patternWorkspace").classList.add("hidden");
     document.getElementById("toolingWorkspace").classList.remove("hidden");
@@ -597,6 +615,8 @@ async function applySettings() {
     const settings = await ipcRenderer.invoke('get-settings');
 
     document.body.classList.toggle('dark-mode', settings.darkMode);
+
+    setTheme(settings.theme);
 
     applyDocumentSettings(settings);
 }
@@ -1018,9 +1038,11 @@ function drawGrid() {
     const units = unitsSelect?.value || 'in'; // safe fallback
     spacing = getGridSpacing(units);
 
+    const rootStyles = getComputedStyle(document.documentElement);
+
     for (let x = 0, i = 0; x <= canvas.width; x += spacing, i++) {
         ctx.lineWidth = (i % majorEvery === 0) ? 1 : 0.5;
-        ctx.strokeStyle = (i % majorEvery === 0) ? '#7e7e7e' : '#b6b6b6';
+        ctx.strokeStyle = (i % majorEvery === 0) ? rootStyles.getPropertyValue('--grid-dark') : rootStyles.getPropertyValue('--grid-light');
 
         ctx.beginPath();
         ctx.moveTo(x, 0);

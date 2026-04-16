@@ -64,7 +64,8 @@ function loadSettings() {
             type: 'letter', // 'letter', 'a4', 'custom'
             width: 8.5,
             height: 11
-        }
+        },
+        theme: 'default'
     };
 }
 
