@@ -1,5 +1,6 @@
 // TODO List
-// 
+// Finish stitching Tool
+//      -teather to move tool, make persistent, add to undo stack, implement spacing/offset user controls
 
 
 
@@ -2279,6 +2280,7 @@ document.addEventListener('keydown', e => {
         clearSelection();
         cancelPolyline();
         measures = [];
+        stitchingPatterns = [];
         saveState();
         drawAll();
         return;
