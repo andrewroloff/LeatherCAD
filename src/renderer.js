@@ -1,3 +1,8 @@
+// TODO List
+// 
+
+
+
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
 
@@ -12,6 +17,7 @@ let gMoveActive = false;
 let gNodes = [];   // array of nodes being moved
 let gOrigin = null; // reference position (mouse at start)
 let gMoveDelta = { dx: 0, dy: 0 };
+let xLock, yLock = false;
 
 let gRotateActive = false;
 let gRotateAngle = null;
@@ -67,6 +73,17 @@ let isDrawing = false;
 let currentStroke = [];
 let simplify = true;
 
+let showDimensions = false;
+
+let isDrawingShape = false; // for drag
+let shapeStart = null;      // first corner / center
+
+let measureStart = null;
+let measures = [];
+
+let stitchingPatterns = [];
+let stitchSpacing = 0.15748 * PPU;
+
 // fit window better
 function resizeWindow() {
     // optional: shrink canvas slightly to fit window
@@ -89,6 +106,16 @@ ipcRenderer.on('toggle-dark', () => {
     const isDark = document.body.classList.toggle('dark-mode');
 
     ipcRenderer.send('set-setting', 'darkMode', isDark);
+});
+
+ipcRenderer.on('show-dims', () => {
+    if (showDimensions) {
+        showDimensions = false;
+    } else {
+        showDimensions = true;
+    }
+
+    drawAll();
 });
 
 // Update Settings
@@ -407,7 +434,8 @@ const toolIcons = {
     rectangle: '../assets/icons/rectangle.svg',
     circle: '../assets/icons/circle.svg',
     select: '../assets/icons/select.svg',
-    node: '../assets/icons/node.svg'
+    node: '../assets/icons/node.svg',
+    measure: '../assets/icons/measure.svg'
 };
 
 const toolIndicator = document.getElementById('toolIndicator');
@@ -435,6 +463,139 @@ let boxEnd = null;
 let lastClickTime = 0;
 
 // ---------------- Helpers ----------------
+function drawStitches() {
+    ctx.save();
+
+    ctx.fillStyle = '#00f';
+
+    for (const s of stitchingPatterns) {
+        for (const p of s.points) {
+            ctx.beginPath();              // reset path
+            ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+            ctx.fill();                   // fill only (no stroke)
+        }
+    }
+
+    ctx.restore();
+}
+
+function generateStitches(poly, stitchSpacing) {
+    const points = [];
+
+    let carry = 0; // leftover distance from previous segment
+
+    for (let i = 0; i < poly.size() - 1; i++) {
+        const p1 = poly.get(i);
+        const p2 = poly.get(i + 1);
+
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        const segLen = Math.hypot(dx, dy);
+
+        dx /= segLen;
+        dy /= segLen;
+
+        let dist = carry;
+
+        while (dist <= segLen) {
+            const x = p1.x + dx * dist;
+            const y = p1.y + dy * dist;
+
+            points.push({ x, y });
+
+            dist += stitchSpacing;
+        }
+
+        carry = dist - segLen;
+    }
+
+    return points;
+}
+
+function endMeasure(x, y) {
+    if (!measureStart) return;
+
+    measures.push({
+        x1: measureStart.x,
+        y1: measureStart.y,
+        x2: x,
+        y2: y
+    });
+
+    measureStart = null;
+    saveState();
+    return;
+}
+
+function drawDimensionLabel(ctx, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+
+    const length = Math.sqrt(dx * dx + dy * dy);
+    if (length < 20) return;
+
+    // --- DASHED LINE ---
+    ctx.save();
+
+    ctx.strokeStyle = "#ffffff"; // or use your theme color
+    ctx.lineWidth = 1;
+
+    ctx.setLineDash([6, 4]); // dash length, gap length
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    ctx.restore();
+    // --- END DASHED LINE ---
+
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+
+    const angle = Math.atan2(dy, dx);
+
+    const text = length.toFixed(1);
+
+    // perpendicular offset
+    const offset = 10;
+    const nx = -dy / length;
+    const ny = dx / length;
+
+    const labelX = midX + nx * offset;
+    const labelY = midY + ny * offset;
+
+    const style = getComputedStyle(document.documentElement);
+
+    ctx.save();
+
+    ctx.translate(labelX, labelY);
+    ctx.rotate(angle);
+
+    if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+        ctx.rotate(Math.PI);
+    }
+
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const padding = 4;
+    const metrics = ctx.measureText(text);
+    const w = metrics.width + padding * 2;
+    const h = 14;
+
+    // background
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+
+    // text
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, 0, 0);
+
+    ctx.restore();
+}
+
 function setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
@@ -524,6 +685,8 @@ function pasteSelection() {
     // 🔥 Activate move mode immediately
     gNodes = newNodes;
     gMoveActive = true;
+    xLock = false;
+    yLock = false;
 
     // Use current mouse position as origin
     if (mousePos) {
@@ -859,7 +1022,8 @@ function exportPattern() {
             PPU: PPU
         },
         entities: [],
-        guides: []
+        guides: [],
+        stitchingPatterns: []
     };
 
 
@@ -885,6 +1049,8 @@ function exportPattern() {
             pos: g.pos
         });
     }
+
+    data.stitchingPatterns.push(stitchingPatterns);
 
     return data;
 }
@@ -1111,12 +1277,19 @@ function drawEntities() {
         for (let j = 1; j < nodeCount; j++) {
             const node = poly.get(j);
             ctx.lineTo(node.x, node.y);
+            if (showDimensions) {
+                const prev = poly.get(j - 1);
+                drawDimensionLabel(ctx, prev.x, prev.y, node.x, node.y);
+            }
+            ctx.stroke();
         }
 
-        ctx.stroke();
+
+    }
+    for (const m of measures) {
+        drawDimensionLabel(ctx, m.x1, m.y1, m.x2, m.y2);
     }
 }
-
 // ---------------- Overlay ----------------
 function drawOverlay() {
     // active polyline
@@ -1183,7 +1356,7 @@ function drawOverlay() {
         ctx.fill();
     });
 
-    // Draw ghost snaPPUng node
+    // Draw ghost snapping node
     if (ghostSnap && snapEnabled && snapToNodes) {
         ctx.fillStyle = '#0ff';
         ctx.beginPath();
@@ -1375,6 +1548,51 @@ function drawOverlay() {
             ctx.stroke();
         }
     }
+
+    // ghost for measure
+    if (currentTool === 'measure' && measureStart && mousePos) {
+        let ghost = mousePos;
+
+        if (snapEnabled) {
+            ghost = snapPoint(mousePos.x, mousePos.y);
+        }
+
+        ctx.save();
+
+        // dashed preview line
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+
+        ctx.beginPath();
+        ctx.moveTo(measureStart.x, measureStart.y);
+        ctx.lineTo(ghost.x, ghost.y);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+
+        // optional: ghost endpoints
+        ctx.fillStyle = '#ffd166';
+
+        ctx.beginPath();
+        ctx.arc(measureStart.x, measureStart.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(ghost.x, ghost.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        // draw live dimension label
+        drawDimensionLabel(
+            ctx,
+            measureStart.x,
+            measureStart.y,
+            ghost.x,
+            ghost.y
+        );
+    }
 }
 
 // ---------------- Coordinate Input ----------------
@@ -1422,23 +1640,7 @@ function drawAll() {
     drawGuides();
     drawEntities();
     drawOverlay();
-
-    // Ghost rectangle / circle
-    if (isDrawingShape && shapeStart && mousePos) {
-        ctx.strokeStyle = '#ffd166';
-        ctx.lineWidth = 2.5;
-        if (currentTool === 'rectangle') {
-            const w = mousePos.x - shapeStart.x;
-            const h = mousePos.y - shapeStart.y;
-            ctx.strokeRect(shapeStart.x, shapeStart.y, w, h);
-        }
-        if (currentTool === 'circle') {
-            const r = Math.hypot(mousePos.x - shapeStart.x, mousePos.y - shapeStart.y);
-            ctx.beginPath();
-            ctx.arc(shapeStart.x, shapeStart.y, r, 0, Math.PI * 2);
-            ctx.stroke();
-        }
-    }
+    drawStitches();
 }
 
 // ---------------- Geometry ----------------
@@ -1628,9 +1830,6 @@ function findNodeAt(x, y, r = 8) {
 }
 
 // ---------------- Mouse ----------------
-let isDrawingShape = false; // for drag
-let shapeStart = null;      // first corner / center
-
 canvas.addEventListener('mousedown', e => {
     const rawX = e.offsetX;
     const rawY = e.offsetY;
@@ -1734,6 +1933,14 @@ canvas.addEventListener('mousedown', e => {
             finalizeShape(x, y);    // second click
         }
     }
+
+    if (currentTool === 'measure') {
+        if (!measureStart) {
+            measureStart = { x, y };
+        } else {
+            endMeasure(x, y);
+        }
+    }
 });
 
 window.addEventListener('mousemove', e => {
@@ -1782,8 +1989,11 @@ canvas.addEventListener('mousemove', e => {
     if (gMoveActive && gOrigin) {
         const snap = snapPoint(mousePos.x, mousePos.y);
 
-        const dx = snap.x - gOrigin.x;
-        const dy = snap.y - gOrigin.y;
+        let dx = snap.x - gOrigin.x;
+        let dy = snap.y - gOrigin.y;
+
+        if (xLock) dy = 0;
+        if (yLock) dx = 0;
 
         ghostSnap = snap;
 
@@ -1941,6 +2151,22 @@ document.addEventListener('keydown', e => {
         return;
     }
 
+    // ----------- ctrl + 'g' to generate stitches ----
+    if (!typing && e.ctrlKey && e.key.toLowerCase() === 'g') {
+        if (!mousePos) return;
+        selection.polylines.forEach(i => {
+            const poly = doc.getPolyline(i);
+            const points = generateStitches(poly, stitchSpacing);
+            stitchingPatterns.push({
+                i,
+                stitchSpacing,
+                offset: 0,
+                points
+            });
+        });
+        return;
+    }
+
     // ------- 'g' to move ----------
     if (!typing && e.key.toLowerCase() === 'g') {
         if (!mousePos) return;
@@ -1983,12 +2209,14 @@ document.addEventListener('keydown', e => {
 
         gNodes = nodes;
         gMoveActive = true;
+        xLock = false;
+        yLock = false;
 
         gOrigin = mousePos;
     }
 
-    if (e.key === 'x') gMoveDelta.dy = 0;
-    if (e.key === 'y') gMoveDelta.dx = 0;
+    if (e.key === 'x') xLock = !xLock;
+    if (e.key === 'y') yLock = !yLock;
 
     // 'r' to rotate
     if (!typing && e.key.toLowerCase() === 'r') {
@@ -2036,6 +2264,13 @@ document.addEventListener('keydown', e => {
         return;
     }
 
+    if (!typing && e.key.toLowerCase() === 'm') {
+        currentTool = 'measure';
+        updateToolIndicator();
+        e.preventDefault();
+        return;
+    }
+
 
     // ----- Clear canvas -----
     if (!typing && e.altKey && e.key.toLowerCase() === 'c') {
@@ -2043,6 +2278,7 @@ document.addEventListener('keydown', e => {
         if (!doc.guides) doc.guides = [];
         clearSelection();
         cancelPolyline();
+        measures = [];
         saveState();
         drawAll();
         return;

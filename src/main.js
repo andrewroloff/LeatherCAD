@@ -197,7 +197,8 @@ app.whenReady().then(() => {
         {
             label: 'View',
             submenu: [
-                { label: 'Dark Mode', click: () => mainWindow.webContents.send('toggle-dark') }
+                { label: 'Dark Mode', click: () => mainWindow.webContents.send('toggle-dark') },
+                { label: 'Show Dimensions', click: () => mainWindow.webContents.send('show-dims') }
             ]
         },
         {
