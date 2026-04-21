@@ -1,8 +1,7 @@
 // TODO List
 // Finish stitching Tool
-//      -teather to move tool, make persistent, add to undo stack, implement spacing/offset user controls
-
-
+//      -implement spacing/offset user controls
+// Polyline merger
 
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
@@ -13,6 +12,8 @@ let doc = null;
 let ModuleRef = null;
 let currentPolyline = [];
 let mousePos = null;
+
+let startingPosition = null;
 
 let gMoveActive = false;
 let gNodes = [];   // array of nodes being moved
@@ -84,6 +85,11 @@ let measures = [];
 
 let stitchingPatterns = [];
 let stitchSpacing = 0.15748 * PPU;
+const inset = 0.125 * PPU;
+
+let isStitched = false;
+
+let flag = 0;
 
 // fit window better
 function resizeWindow() {
@@ -463,7 +469,25 @@ let boxEnd = null;
 
 let lastClickTime = 0;
 
+let unresolvedStitches = false;
+
 // ---------------- Helpers ----------------
+function hasStitches(polyIndex) {
+    return stitchingPatterns.some(p => p.polyIndex === polyIndex);
+}
+
+function removeStitches(polyIndex, flag = 0) {
+    for (let i = stitchingPatterns.length - 1; i >= 0; i--) {
+        if (stitchingPatterns[i].polyIndex === polyIndex) {
+            stitchingPatterns.splice(i, 1);
+        }
+    }
+    if (flag === 1) {
+        unresolvedStitches = true;
+    }
+}
+
+
 function drawStitches() {
     ctx.save();
 
@@ -480,38 +504,192 @@ function drawStitches() {
     ctx.restore();
 }
 
-function generateStitches(poly, stitchSpacing) {
-    const points = [];
+function resolveStitchTargets(selection, doc) {
+    const visited = new Set();
+    const results = [];
 
-    let carry = 0; // leftover distance from previous segment
+    for (const i of selection.polylines) {
+        if (visited.has(i)) continue;
 
-    for (let i = 0; i < poly.size() - 1; i++) {
-        const p1 = poly.get(i);
-        const p2 = poly.get(i + 1);
+        const group = collectConnectedPolylines(i, selection, doc);
 
-        let dx = p2.x - p1.x;
-        let dy = p2.y - p1.y;
-        const segLen = Math.hypot(dx, dy);
-
-        dx /= segLen;
-        dy /= segLen;
-
-        let dist = carry;
-
-        while (dist <= segLen) {
-            const x = p1.x + dx * dist;
-            const y = p1.y + dy * dist;
-
-            points.push({ x, y });
-
-            dist += stitchSpacing;
+        for (const j of group) {
+            visited.add(j);
+            results.push(j); // <-- MUST be index
         }
-
-        carry = dist - segLen;
     }
 
-    return points;
+    return results;
 }
+
+function collectConnectedPolylines(startIndex, selection, doc) {
+    const stack = [startIndex];
+    const visited = new Set();
+
+    while (stack.length) {
+        const i = stack.pop();
+        if (visited.has(i)) continue;
+
+        visited.add(i);
+
+        const a = doc.getPolyline(i);
+
+        for (const j of selection.polylines) {
+            if (visited.has(j)) continue;
+
+            const b = doc.getPolyline(j);
+
+            if (areConnected(a, b)) {
+                stack.push(j);
+            }
+        }
+    }
+
+    return visited; // Set of indices
+}
+
+function areConnected(a, b) {
+    const eps = 0.001;
+
+    const a0 = a.get(0);
+    const a1 = a.get(a.size() - 1);
+
+    const b0 = b.get(0);
+    const b1 = b.get(b.size() - 1);
+
+    return (
+        dist(a0, b0) < eps ||
+        dist(a0, b1) < eps ||
+        dist(a1, b0) < eps ||
+        dist(a1, b1) < eps
+    );
+}
+
+function dist(p, q) {
+    const dx = p.x - q.x;
+    const dy = p.y - q.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function isClosed(poly) {
+    const a = poly.get(0);
+    const b = poly.get(poly.size() - 1);
+
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+
+    return (dx * dx + dy * dy) < 0.0001;
+}
+
+function generateStitches(poly, stitchSpacing, inset = 0) {
+    const result = [];
+    const n = poly.size();
+    if (n < 2) return result;
+
+    // ---- cache points ----
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+        pts.push(poly.get(i));
+    }
+
+    const closed = dist2(pts[0], pts[n - 1]) < 1e-6;
+    const count = closed ? n - 1 : n;
+
+    // ---- polygon winding (global, stable) ----
+    let area = 0;
+    for (let i = 0; i < count; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % count];
+        area += a.x * b.y - b.x * a.y;
+    }
+    const sign = area > 0 ? 1 : -1; // consistent inward direction
+
+    // ---- helpers ----
+    function norm(x, y) {
+        const l = Math.hypot(x, y);
+        return l ? [x / l, y / l] : [0, 0];
+    }
+
+    function offsetPoint(p, nx, ny) {
+        return {
+            x: p.x + nx,
+            y: p.y + ny
+        };
+    }
+
+    // ---- build offset polyline (mitered corners) ----
+    const offset = [];
+
+    for (let i = 0; i < count; i++) {
+        const prev = pts[(i - 1 + count) % count];
+        const cur = pts[i];
+        const next = pts[(i + 1) % count];
+
+        // edge directions
+        let ex1 = cur.x - prev.x;
+        let ey1 = cur.y - prev.y;
+        let ex2 = next.x - cur.x;
+        let ey2 = next.y - cur.y;
+
+        const [nx1, ny1] = norm(-ey1, ex1);
+        const [nx2, ny2] = norm(-ey2, ex2);
+
+        // average normals (miter direction)
+        let mx = nx1 + nx2;
+        let my = ny1 + ny2;
+
+        const mlen = Math.hypot(mx, my);
+
+        if (mlen < 1e-6) {
+            // 180° turn fallback
+            mx = nx1;
+            my = ny1;
+        } else {
+            mx /= mlen;
+            my /= mlen;
+        }
+
+        offset.push(offsetPoint(cur, mx * inset * sign, my * inset * sign));
+    }
+
+    // ---- sample offset polyline ----
+    for (let i = 0; i < (closed ? offset.length : offset.length - 1); i++) {
+        const a = offset[i];
+        const b = offset[(i + 1) % offset.length];
+
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+
+        const len = Math.hypot(dx, dy);
+        if (len === 0) continue;
+
+        dx /= len;
+        dy /= len;
+
+        for (let d = 0; d <= len; d += stitchSpacing) {
+            result.push({
+                x: a.x + dx * d,
+                y: a.y + dy * d
+            });
+        }
+    }
+
+    return result;
+}
+
+// ---- helper ----
+function dist2(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+function distance2(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
 
 function endMeasure(x, y) {
     if (!measureStart) return;
@@ -1132,12 +1310,14 @@ function snapPoint(x, y) {
 
     // Self-snapping to the last node of current polyline
     if (snapEnabled && currentPolyline.length > 0) {
-        const last = currentPolyline[currentPolyline.length - 1];
-        const dist = Math.hypot(last.x - x, last.y - y);
-        if (dist <= snapRadius && dist < minDist) {
-            closestNode = { x: last.x, y: last.y };
-            minDist = dist;
+        for (node of currentPolyline) {
+            const dist = Math.hypot(node.x - x, node.y - y);
+            if (dist <= snapRadius && dist < minDist) {
+                closestNode = { x: node.x, y: node.y };
+                minDist = dist;
+            }
         }
+
     }
 
     if (closestNode) {
@@ -1475,7 +1655,7 @@ function drawOverlay() {
                         nn.polyIndex === p && nn.nodeIndex === i - 1
                     );
                     prevX = (prevNode.startX - gOrigin.x) * Math.cos(gRotateAngle) - (prevNode.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
-                    prevY = (prevNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (prevNode.StartY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
+                    prevY = (prevNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (prevNode.startY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
                 } else {
                     // normal case → use real position
                     const prev = poly.get(i - 1);
@@ -1495,8 +1675,8 @@ function drawOverlay() {
                     const nextNode = gNodes.find(nn =>
                         nn.polyIndex === p && nn.nodeIndex === i + 1
                     );
-                    nextX = (nextNode.startX - gOrigin.x) * Math.cos(gRotateAngle) - (nextNode.StartY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
-                    nextY = (nextNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (nextNode.StartY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
+                    nextX = (nextNode.startX - gOrigin.x) * Math.cos(gRotateAngle) - (nextNode.startY - gOrigin.y) * Math.sin(gRotateAngle) + gOrigin.x;
+                    nextY = (nextNode.startX - gOrigin.x) * Math.sin(gRotateAngle) + (nextNode.startY - gOrigin.y) * Math.cos(gRotateAngle) + gOrigin.y;
                 } else {
                     const next = poly.get(i + 1);
                     nextX = next.x;
@@ -1647,6 +1827,7 @@ function drawAll() {
 // ---------------- Geometry ----------------
 function startPolyline(x, y) {
     currentPolyline = [{ x, y }];
+    startingPosition = [{ x, y }]
     showInput(x, y);
 }
 
@@ -1865,6 +2046,28 @@ canvas.addEventListener('mousedown', e => {
         gMoveDelta = { dx: 0, dy: 0 };
         ghostSnap = null;
 
+        if (unresolvedStitches === true) {
+            console.log("unresolvedStitches: ", unresolvedStitches);
+            const targets = resolveStitchTargets(selection, doc);
+
+            for (const i of targets) {
+                const poly = doc.getPolyline(i);
+
+                const points = generateStitches(poly, stitchSpacing, inset);
+
+
+                stitchingPatterns.push({
+                    poly,              // store actual geometry, not index
+                    stitchSpacing,
+                    offset: 0,
+                    points,
+                    polyIndex: i
+                });
+            }
+
+            unresolvedStitches = false;
+        }
+
         saveState();
         drawAll();
         return;
@@ -1885,6 +2088,28 @@ canvas.addEventListener('mousedown', e => {
         gNodes = [];
         gRotateAngle = 0;
         ghostSnap = null;
+
+        if (unresolvedStitches === true) {
+            console.log("unresolvedStitches: ", unresolvedStitches);
+            const targets = resolveStitchTargets(selection, doc);
+
+            for (const i of targets) {
+                const poly = doc.getPolyline(i);
+
+                const points = generateStitches(poly, stitchSpacing, inset);
+
+
+                stitchingPatterns.push({
+                    poly,              // store actual geometry, not index
+                    stitchSpacing,
+                    offset: 0,
+                    points,
+                    polyIndex: i
+                });
+            }
+
+            unresolvedStitches = false;
+        }
 
         saveState();
         drawAll();
@@ -2155,16 +2380,24 @@ document.addEventListener('keydown', e => {
     // ----------- ctrl + 'g' to generate stitches ----
     if (!typing && e.ctrlKey && e.key.toLowerCase() === 'g') {
         if (!mousePos) return;
-        selection.polylines.forEach(i => {
+
+        const targets = resolveStitchTargets(selection, doc);
+
+        for (const i of targets) {
             const poly = doc.getPolyline(i);
-            const points = generateStitches(poly, stitchSpacing);
+
+            const points = generateStitches(poly, stitchSpacing, inset);
+
+
             stitchingPatterns.push({
-                i,
+                poly,              // store actual geometry, not index
                 stitchSpacing,
                 offset: 0,
-                points
+                points,
+                polyIndex: i
             });
-        });
+        }
+
         return;
     }
 
@@ -2178,6 +2411,11 @@ document.addEventListener('keydown', e => {
         // ---- PASS 1: find closest node ----
         selection.nodes.forEach(key => {
             const [p, n] = key.split(':').map(Number);
+            if (hasStitches(p)) {
+                flag = 1;
+            }
+            removeStitches(p, flag);
+            flag = 0;
             const node = doc.getPolyline(p).get(n);
 
             const dx = node.x - mousePos.x;
@@ -2231,6 +2469,11 @@ document.addEventListener('keydown', e => {
 
         selection.nodes.forEach(key => {
             const [p, n] = key.split(':').map(Number);
+            if (hasStitches(p)) {
+                flag = 1;
+            }
+            removeStitches(p, flag);
+            flag = 0;
             const node = doc.getPolyline(p).get(n);
 
             nodes.push({
@@ -2307,6 +2550,8 @@ document.addEventListener('keydown', e => {
             drawAll();
             return;
         }
+
+        hideDynamicInput();
 
         // Cancel rotate
         if (gRotateActive) {
@@ -2462,6 +2707,7 @@ function deleteSelection() {
 
     for (let i = 0; i < doc.entityCount(); i++) {
         const poly = doc.getPolyline(i);
+        removeStitches(i);
 
         // Check which nodes are selected
         const nodesToKeep = [];

@@ -129,6 +129,17 @@ public:
         nodes.insert(nodes.begin() + nodeIndex, Node(x, y));
     }
 
+    void mergeNode(int polyIndexFirst, int polyIndexSecond, int nodeIndexFirst, int nodeIndexSecond)
+    {
+        if (polyIndexFirst < 0 || polyIndexFirst >= entities.size() || polyIndexSecond < 0 || polyIndexSecond >= entities.size())
+        {
+            return;
+        }
+
+        auto &nodesFirst = entities[polyIndexFirst].polyline.nodes;
+        auto &nodesSecond = entities[polyIndexSecond].polyline.nodes;
+    }
+
     void addGuide(bool vertical, float pos)
     {
         guides.emplace_back(vertical, pos);
