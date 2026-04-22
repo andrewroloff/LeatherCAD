@@ -166,9 +166,10 @@ body.dark-mode button:active {
 }
 
 /* -------------------- Snap Menu -------------------- */
-#snapMenu {
+#snapMenu,
+#autoMergeDiv {
   position: absolute;
-  top: 1% !important;
+  top: 2% !important;
   left: 1%;
   display: flex;
   gap: 6px;
@@ -180,9 +181,17 @@ body.dark-mode button:active {
   transition: background 0.2s;
 }
 
-body.dark-mode #snapMenu {
+#autoMergeDiv {
+  top: 6% !important;
+  left: 4% !important;
+}
+
+body.dark-mode #snapMenu,
+body.dark-mode #autoMergeDiv {
   background: var(--panel-dark);
 }
+
+
 
 #snapMenu button {
   background: transparent;

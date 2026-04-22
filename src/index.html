@@ -14,10 +14,13 @@
         </div>
 
         <div id="toolIndicator"></div>
-        <div id="snapMenu" style="margin: 8px 0; display: flex; gap: 5px; justify-self: center;">
+        <div id="snapMenu">
             <button data-snap="grid" id="gridSnap" class="snapBtn">Grid</button>
             <button data-snap="nodes" id="nodesSnap" class="snapBtn">Nodes</button>
             <button data-snap="guide" id="guideSnap" class="snapBtn">Guide</button>
+        </div>
+        <div id="autoMergeDiv">
+            Auto Merge <input type="checkbox" name="" id="autoMergeCheck">
         </div>
         <div id="splashOverlay">
             <div id="splashCard">
@@ -61,6 +64,12 @@
                         <label>
                             <input type="checkbox" id="darkModeToggle">
                             Dark Mode
+                        </label>
+                        <label>
+                            Stitching Spacing: <input type="number" id="stitchSpacing" value="0.15748">
+                        </label>
+                        <label>
+                            Stitching Inset: <input type="number" id="stitchInset" value="0.125">
                         </label>
                     </div>
 

@@ -1,7 +1,10 @@
 // TODO List
-// Finish stitching Tool
-//      -implement spacing/offset user controls
-// Polyline merger
+//
+//
+// Fix guide hover mouse
+// Squash bugs (continual)
+//
+// Organize Code
 
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
@@ -85,11 +88,13 @@ let measures = [];
 
 let stitchingPatterns = [];
 let stitchSpacing = 0.15748 * PPU;
-const inset = 0.125 * PPU;
+let inset = 0.125 * PPU;
 
 let isStitched = false;
 
 let flag = 0;
+
+let autoMergeActive = false;
 
 // fit window better
 function resizeWindow() {
@@ -143,7 +148,6 @@ ipcRenderer.on('setting-updated', (event, key, value) => {
 
 // Workspace
 ipcRenderer.on('set-workspace', (event, mode) => {
-    console.log('Switching workspace to:', mode);
     currentWorkspace = mode;
     if (currentWorkspace === 'tooling') showToolingWorkspace();
     if (currentWorkspace === 'pattern') showPatternWorkspace();
@@ -312,7 +316,6 @@ ipcRenderer.on('open-pattern', (event, filePath) => {
         saveState();
         drawAll();
 
-        console.log('Opened:', filePath);
 
     } catch (err) {
         console.error('Failed to open pattern:', err);
@@ -325,19 +328,9 @@ ipcRenderer.on('save-pattern-as', (event, filePath) => {
     try {
         const data = exportPattern();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-        console.log('Saved to', filePath);
     } catch (err) {
         console.error('Save failed:', err);
     }
-});
-
-// Document / grid setup
-ipcRenderer.on('doc-setup', () => {
-    console.log('Document setup stub');
-});
-
-ipcRenderer.on('grid-options', () => {
-    console.log('Grid options stub');
 });
 
 // About dialog
@@ -348,6 +341,8 @@ ipcRenderer.on('about', () => {
 const prefsModal = document.getElementById('preferencesModal');
 const darkToggle = document.getElementById('darkModeToggle');
 const themeSelect = document.getElementById('themeSelect');
+const stitchInsetInput = document.getElementById('stitchInset');
+const stitchSpacingInput = document.getElementById('stitchSpacing');
 
 ipcRenderer.on('open-preferences', async () => {
     prefsModal.classList.remove('hidden');
@@ -371,6 +366,13 @@ ipcRenderer.on('open-preferences', async () => {
     updateCustomVisibility();
 });
 
+stitchInsetInput.onchange = () => {
+    inset = stitchInsetInput.value * PPU;
+};
+
+stitchSpacingInput.onchange = () => {
+    stitchSpacing = stitchSpacingInput.value * PPU;
+};
 
 unitsSelect.onchange = () => {
     ipcRenderer.send('set-setting', 'units', unitsSelect.value);
@@ -472,6 +474,27 @@ let lastClickTime = 0;
 let unresolvedStitches = false;
 
 // ---------------- Helpers ----------------
+function autoMerge(x, y) {
+    const hit = findNodeAt(x, y);
+    if (!hit) return;
+
+    const hits = Array.isArray(hit) ? hit : [hit];
+
+    if (hits.length !== 2) return;
+
+    const a = hits[0];
+    const b = hits[1];
+
+    const polyA = a.polyIndex;
+    const nodeA = a.nodeIndex;
+
+    const polyB = b.polyIndex;
+    const nodeB = b.nodeIndex;
+
+    doc.mergeNodes(polyA, polyB, nodeA, nodeB);
+}
+
+
 function hasStitches(polyIndex) {
     return stitchingPatterns.some(p => p.polyIndex === polyIndex);
 }
@@ -492,6 +515,8 @@ function drawStitches() {
     ctx.save();
 
     ctx.fillStyle = '#00f';
+
+    if (!stitchingPatterns) return;
 
     for (const s of stitchingPatterns) {
         for (const p of s.points) {
@@ -1096,6 +1121,12 @@ function loadState(snapshot) {
             ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
         }
     });
+    stitchingPatterns = [];
+    json.stitchingPatterns.forEach(pat => {
+        stitchingPatterns.push(pat);
+
+        drawStitches();
+    });
 
     drawAll();
 }
@@ -1229,7 +1260,7 @@ function exportPattern() {
         });
     }
 
-    data.stitchingPatterns.push(stitchingPatterns);
+    data.stitchingPatterns = stitchingPatterns;
 
     return data;
 }
@@ -1785,13 +1816,10 @@ function addPointFromInput() {
     const rawX = parseFloat(xRaw) * PPU;
     const rawY = parseFloat(yRaw) * PPU;
 
-    const offsetX = shapeStart.x + rawX;
-    const offsetY = shapeStart.y + rawY;
-
-    let { x, y } = snapPoint(rawX, rawY);;
+    let { x, y } = snapPoint(rawX, rawY);
     if (shapeStart) {
-        x = offsetX;
-        y = offsetY;
+        x = shapeStart.x + rawX;
+        y = shapeStart.y + rawY;
     }
 
     if (currentTool === 'line') {
@@ -1844,7 +1872,9 @@ function finalizePolyline() {
     const id = doc.createPolyline();
     for (let p of currentPolyline) {
         doc.addNodeToPolyline(id, p.x, p.y);
+        if (autoMergeActive) autoMerge(p.x, p.y);
     }
+
     cancelPolyline();
     saveState();
 }
@@ -1995,20 +2025,26 @@ dynamicInput.addEventListener('keydown', (e) => {
 
 // ---------------- Hit Detection ----------------
 function findNodeAt(x, y, r = 8) {
+    const hits = [];
+
     for (let i = 0; i < doc.entityCount(); i++) {
         const poly = doc.getPolyline(i);
 
         for (let j = 0; j < poly.size(); j++) {
             const n = poly.get(j);
+
             const dx = n.x - x;
             const dy = n.y - y;
 
             if (dx * dx + dy * dy < r * r) {
-                return { polyIndex: i, nodeIndex: j };
+                hits.push({ polyIndex: i, nodeIndex: j });
             }
         }
     }
-    return null;
+
+    if (hits.length === 0) return null;
+    if (hits.length === 1) return hits[0];
+    return hits;
 }
 
 // ---------------- Mouse ----------------
@@ -2039,6 +2075,7 @@ canvas.addEventListener('mousedown', e => {
                 n.startX + gMoveDelta.dx,
                 n.startY + gMoveDelta.dy
             );
+            if (autoMergeActive) autoMerge(n.x, n.y);
         });
 
         gMoveActive = false;
@@ -2047,7 +2084,6 @@ canvas.addEventListener('mousedown', e => {
         ghostSnap = null;
 
         if (unresolvedStitches === true) {
-            console.log("unresolvedStitches: ", unresolvedStitches);
             const targets = resolveStitchTargets(selection, doc);
 
             for (const i of targets) {
@@ -2090,7 +2126,6 @@ canvas.addEventListener('mousedown', e => {
         ghostSnap = null;
 
         if (unresolvedStitches === true) {
-            console.log("unresolvedStitches: ", unresolvedStitches);
             const targets = resolveStitchTargets(selection, doc);
 
             for (const i of targets) {
@@ -2126,6 +2161,7 @@ canvas.addEventListener('mousedown', e => {
     // ----- Selection Mode -----
     if (currentTool === 'select') {
         const hit = findNodeAt(x, y);
+        //const poly = doc.;
         if (dbl && hit) {
             // double click selects entire polyline
             clearSelection();
@@ -2133,6 +2169,7 @@ canvas.addEventListener('mousedown', e => {
         } else if (hit) {
             if (!multiSelect) clearSelection();
             selection.nodes.add(nodeKey(hit.polyIndex, hit.nodeIndex));
+            selection.polylines.add(hit.polyIndex);
         } else {
             if (!multiSelect) clearSelection();
             // start box select
@@ -2146,7 +2183,9 @@ canvas.addEventListener('mousedown', e => {
     // ----- Line Tool -----
     if (currentTool === 'line') {
         if (currentPolyline.length === 0) startPolyline(x, y);
-        else addPoint(x, y);
+        else {
+            addPoint(x, y)
+        };
         drawAll();
     }
 
@@ -2196,6 +2235,7 @@ window.addEventListener('mouseup', e => {
                     selection.nodes.add(`${i}:${j}`);
                 }
             }
+            selection.polylines.add(poly);
         }
         isBoxSelecting = false;
         drawAll();
@@ -2398,6 +2438,8 @@ document.addEventListener('keydown', e => {
             });
         }
 
+        saveState();
+
         return;
     }
 
@@ -2505,6 +2547,21 @@ document.addEventListener('keydown', e => {
         currentTool = 'select';
         updateToolIndicator();
         e.preventDefault(); // prevent page from scrolling
+        return;
+    }
+
+    if (!typing && e.ctrlKey && e.key.toLowerCase() === 'm') {
+        if (!selection || !selection.nodes || selection.nodes.size < 2) return;
+        if (!selection.polylines || selection.polylines.length === 0) return;
+
+        const nodesSet = selection.nodes;
+        const [polyA, nodeA] = [...nodesSet][0].split(':').map(Number);
+        const [polyB, nodeB] = [...nodesSet][1].split(':').map(Number);
+
+
+        doc.mergeNodes(polyA, polyB, nodeA, nodeB);
+
+        drawAll();
         return;
     }
 
@@ -2662,6 +2719,12 @@ inputY.addEventListener('keydown', e => {
 const gridSnapButton = document.getElementById('gridSnap');
 const nodesSnapButton = document.getElementById('nodesSnap');
 const guideSnapButton = document.getElementById('guideSnap');
+const autoMergeCheck = document.getElementById('autoMergeCheck');
+
+autoMergeCheck.onchange = () => {
+    autoMergeActive = autoMergeCheck.value;
+};
+
 gridSnapButton.addEventListener("click", () => {
     snapToGuides = false;
     snapToGrid = true;
