@@ -51,8 +51,8 @@ body.dark-mode .workspace {
   background: var(--bg-dark);
 }
 
-/* -------------------- Toolbar -------------------- */
-#toolbar {
+/* -------------------- Tab Bar -------------------- */
+#tabBar {
   display: flex;
   padding: 6px;
   gap: 6px;
@@ -62,7 +62,7 @@ body.dark-mode .workspace {
   transition: background 0.2s, border-color 0.2s;
 }
 
-body.dark-mode #toolbar {
+body.dark-mode #tabBar {
   background: var(--panel-dark);
   border-color: var(--border-dark);
 }
@@ -190,8 +190,6 @@ body.dark-mode #snapMenu,
 body.dark-mode #autoMergeDiv {
   background: var(--panel-dark);
 }
-
-
 
 #snapMenu button {
   background: transparent;
@@ -665,7 +663,7 @@ body.dark-mode .icon {
   height: 100%;
 }
 
-/* Toolbar */
+/* tabBar */
 #toolingToolbar {
   display: flex;
   align-items: center;
@@ -682,7 +680,7 @@ body.dark-mode #toolingToolbar {
   border-bottom: var(--border-dark);
 }
 
-/* Toolbar buttons */
+/* tabBar buttons */
 #toolingToolbar button {
   display: flex;
   align-items: center;
@@ -710,7 +708,7 @@ body.dark-mode #toolingToolbar button {
   font-size: 0.9rem;
 }
 
-/* Toolbar icons */
+/* tabBar icons */
 #toolingToolbar .icon {
   width: 24px;
   height: 24px;

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let currentFilePath = null;
 
 const RECENTS_PATH = path.join(app.getPath('userData'), 'recents.json');
 const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
@@ -136,14 +137,20 @@ app.whenReady().then(() => {
                     label: 'Save Pattern',
                     accelerator: 'Ctrl+S',
                     click: async () => {
-                        const { canceled, filePath } = await dialog.showSaveDialog({
-                            title: 'Save Pattern',
-                            defaultPath: 'untitled.pattern',
-                            filters: [{ name: 'Pattern Files', extensions: ['pattern'] }]
-                        });
+                        if (currentFilePath) {
+                            // Save directly
+                            mainWindow.webContents.send('save-pattern-as', currentFilePath);
+                        } else {
+                            const { canceled, filePath } = await dialog.showSaveDialog({
+                                title: 'Save Pattern',
+                                defaultPath: 'untitled.pattern',
+                                filters: [{ name: 'Pattern Files', extensions: ['pattern'] }]
+                            });
 
-                        if (!canceled && filePath) {
-                            mainWindow.webContents.send('save-pattern-as', filePath);
+                            if (!canceled && filePath) {
+                                currentFilePath = filePath;
+                                mainWindow.webContents.send('save-pattern-as', filePath);
+                            }
                         }
                     }
                 },
@@ -158,6 +165,7 @@ app.whenReady().then(() => {
                         });
 
                         if (!canceled && filePath) {
+                            currentFilePath = filePath;
                             mainWindow.webContents.send('save-pattern-as', filePath);
                         }
                     }
@@ -244,7 +252,7 @@ app.whenReady().then(() => {
 
     ipcMain.on('open-pattern', (event, filePath) => {
         if (!filePath) return;
-
+        currentFilePath = filePath;
         addRecent(filePath);
         mainWindow.webContents.send('open-pattern', filePath);
     });

@@ -1,10 +1,15 @@
 // TODO List
 //
+// Add multisheet capability (Tabs, split pane capability, print should print all at once, add to exportPattern)
 //
-// Fix guide hover mouse
 // Squash bugs (continual)
 //
-// Organize Code
+// Figure out what to add next
+
+
+// =====================================================
+// 1. INITIALIZATION
+// =====================================================
 
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
@@ -60,14 +65,22 @@ const pageType = document.getElementById('pageType');
 const pageWidth = document.getElementById('pageWidth');
 const pageHeight = document.getElementById('pageHeight');
 const customSize = document.getElementById('customSize');
+const gridSnapButton = document.getElementById('gridSnap');
+const nodesSnapButton = document.getElementById('nodesSnap');
+const guideSnapButton = document.getElementById('guideSnap');
+const autoMergeCheck = document.getElementById('autoMergeCheck');
+const dynamicInput = document.getElementById("dynamicInput");
+const dynamicLabel = document.getElementById("dynamicLabel");
+const dynamicDiv = document.getElementById("dynamicNumberInput");
+const inputX = document.getElementById('inputX');
+const inputY = document.getElementById('inputY');
+const coordContainer = document.getElementById('coordinateInput');
+const newFileButton = document.getElementById('newFileBtn');
+const openFileButton = document.getElementById('openFileBtn');
 
 let selectedGuideIndex = null;
 let guideDragActive = false;
 const guideSelectRadius = 6; // pixels
-
-const dynamicInput = document.getElementById("dynamicInput");
-const dynamicLabel = document.getElementById("dynamicLabel");
-const dynamicDiv = document.getElementById("dynamicNumberInput");
 
 let currentContext = null; // "node", "hGuide", "vGuide"
 let activeObject = null;   // reference to node or guide being edited
@@ -77,6 +90,8 @@ let toolingCtx = toolingCanvas.getContext("2d");
 let isDrawing = false;
 let currentStroke = [];
 let simplify = true;
+let toolingUndoStack = [];
+let toolingRedoStack = [];
 
 let showDimensions = false;
 
@@ -108,9 +123,6 @@ function resizeWindow() {
 resizeWindow();
 window.addEventListener('resize', resizeWindow);
 
-const inputX = document.getElementById('inputX');
-const inputY = document.getElementById('inputY');
-const coordContainer = document.getElementById('coordinateInput');
 
 // --------------------- IPC -----------------------
 // Dark Mode Toggle
@@ -449,15 +461,7 @@ const toolIcons = {
 
 const toolIndicator = document.getElementById('toolIndicator');
 
-function updateToolIndicator() {
-    if (!toolIndicator) return;
-    const iconPath = toolIcons[currentTool];
-    if (iconPath) {
-        toolIndicator.innerHTML = `<img src="${iconPath}" alt="${currentTool}" style="width:24px;height:24px;">`;
-    } else {
-        toolIndicator.textContent = '?';
-    }
-}
+
 
 // ---------------- Selection State ----------------
 let selection = {
@@ -473,7 +477,106 @@ let lastClickTime = 0;
 
 let unresolvedStitches = false;
 
-// ---------------- Helpers ----------------
+// =====================================================
+// 2. HELPERS
+// =====================================================
+// -------------- File Ops --------------
+// Load a .pattern file
+function loadPattern(file) {
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        try {
+            const json = JSON.parse(e.target.result);
+
+            // Reset doc
+            doc = new ModuleRef.Document();
+            clearSelection();
+            cancelPolyline();
+            if (!doc.guides) doc.guides = [];
+
+            // Load entities
+            json.entities.forEach(ent => {
+                if (ent.type === 'polyline') {
+                    const id = doc.createPolyline();
+                    ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
+                } else if (ent.type === 'rectangle') {
+                    const id = doc.createPolyline();
+                    const { start, end } = ent;
+                    doc.addNodeToPolyline(id, start.x, start.y);
+                    doc.addNodeToPolyline(id, end.x, start.y);
+                    doc.addNodeToPolyline(id, end.x, end.y);
+                    doc.addNodeToPolyline(id, start.x, end.y);
+                    doc.addNodeToPolyline(id, start.x, start.y);
+                } else if (ent.type === 'circle') {
+                    const id = doc.createPolyline();
+                    const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
+                    pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
+                }
+            });
+            // Load guides
+            if (json.guides) {
+                json.guides.forEach(g => {
+                    doc.addGuide(g.vertical, g.pos);
+                });
+            }
+
+            drawAll();
+        } catch (err) {
+            console.error('Error loading pattern:', err);
+            alert('Failed to load pattern file.');
+        }
+    };
+    reader.readAsText(file);
+}
+
+// ---------------- Delete ----------------
+function deleteSelection() {
+    if (!doc || !ModuleRef) return;
+
+    const newDoc = new ModuleRef.Document();
+
+    for (let i = 0; i < doc.entityCount(); i++) {
+        const poly = doc.getPolyline(i);
+        removeStitches(i);
+
+        // Check which nodes are selected
+        const nodesToKeep = [];
+        for (let j = 0; j < poly.size(); j++) {
+            const key = `${i}:${j}`;
+            if (!selection.nodes.has(key)) {
+                nodesToKeep.push(poly.get(j));
+            }
+        }
+
+        // Only keep polyline if >=2 nodes remain
+        if (nodesToKeep.length >= 2) {
+            const id = newDoc.createPolyline();
+            for (let n of nodesToKeep) {
+                newDoc.addNodeToPolyline(id, n.x, n.y);
+            }
+        }
+    }
+
+    // Clear selection
+    clearSelection();
+
+    // Replace doc
+    doc = newDoc;
+    if (!doc.guides) doc.guides = [];
+
+    drawAll();
+}
+
+function updateToolIndicator() {
+    if (!toolIndicator) return;
+    const iconPath = toolIcons[currentTool];
+    if (iconPath) {
+        toolIndicator.innerHTML = `<img src="${iconPath}" alt="${currentTool}" style="width:24px;height:24px;">`;
+    } else {
+        toolIndicator.textContent = '?';
+    }
+}
+
 function autoMerge(x, y) {
     const hit = findNodeAt(x, y);
     if (!hit) return;
@@ -629,7 +732,6 @@ function generateStitches(poly, stitchSpacing, inset = 0) {
     }
     const sign = area > 0 ? 1 : -1; // consistent inward direction
 
-    // ---- helpers ----
     function norm(x, y) {
         const l = Math.hypot(x, y);
         return l ? [x / l, y / l] : [0, 0];
@@ -1080,9 +1182,13 @@ function updateGuideHover(mousePos) {
             hovering = true;
             break;
         }
-        if (!g.vertical && Math.abs(mousePos.y - g.pos) < guideSelectRadius) {
+        else if (!g.vertical && Math.abs(mousePos.y - g.pos) < guideSelectRadius) {
             canvas.style.cursor = 'ns-resize';
             hovering = true;
+            break;
+        } else {
+            canvas.style.cursor = 'default';
+            hovering = false;
             break;
         }
     }
@@ -1340,7 +1446,7 @@ function snapPoint(x, y) {
     }
 
     // Self-snapping to the last node of current polyline
-    if (snapEnabled && currentPolyline.length > 0) {
+    if (snapEnabled && snapToNodes && currentPolyline.length > 0) {
         for (node of currentPolyline) {
             const dist = Math.hypot(node.x - x, node.y - y);
             if (dist <= snapRadius && dist < minDist) {
@@ -1519,7 +1625,7 @@ function drawOverlay() {
         ctx.strokeStyle = '#ffd166';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(last.x, last.y); // <-- move to last node
+        ctx.moveTo(last.x, last.y);
         let ghost = mousePos;
         if (snapEnabled) {
             ghost = snapPoint(mousePos.x, mousePos.y);
@@ -2047,7 +2153,11 @@ function findNodeAt(x, y, r = 8) {
     return hits;
 }
 
-// ---------------- Mouse ----------------
+// =====================================================
+// 3. INPUT SYSTEM (mouse/keyboard)
+// =====================================================
+
+// ----------------- Mouse ----------------
 canvas.addEventListener('mousedown', e => {
     const rawX = e.offsetX;
     const rawY = e.offsetY;
@@ -2219,29 +2329,6 @@ window.addEventListener('mousemove', e => {
     }
 });
 
-window.addEventListener('mouseup', e => {
-    // Complete box select
-    if (isBoxSelecting) {
-        const minX = Math.min(boxStart.x, boxEnd.x);
-        const maxX = Math.max(boxStart.x, boxEnd.x);
-        const minY = Math.min(boxStart.y, boxEnd.y);
-        const maxY = Math.max(boxStart.y, boxEnd.y);
-
-        for (let i = 0; i < doc.entityCount(); i++) {
-            const poly = doc.getPolyline(i);
-            for (let j = 0; j < poly.size(); j++) {
-                const n = poly.get(j);
-                if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
-                    selection.nodes.add(`${i}:${j}`);
-                }
-            }
-            selection.polylines.add(poly);
-        }
-        isBoxSelecting = false;
-        drawAll();
-    }
-})
-
 canvas.addEventListener('mousemove', e => {
     // Update current mouse position
     mousePos = { x: e.offsetX, y: e.offsetY };
@@ -2341,22 +2428,32 @@ canvas.addEventListener('mouseup', e => {
     }
 });
 
+window.addEventListener('mouseup', e => {
+    // Complete box select
+    if (isBoxSelecting) {
+        const minX = Math.min(boxStart.x, boxEnd.x);
+        const maxX = Math.max(boxStart.x, boxEnd.x);
+        const minY = Math.min(boxStart.y, boxEnd.y);
+        const maxY = Math.max(boxStart.y, boxEnd.y);
+
+        for (let i = 0; i < doc.entityCount(); i++) {
+            const poly = doc.getPolyline(i);
+            for (let j = 0; j < poly.size(); j++) {
+                const n = poly.get(j);
+                if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
+                    selection.nodes.add(`${i}:${j}`);
+                }
+            }
+            selection.polylines.add(poly);
+        }
+        isBoxSelecting = false;
+        drawAll();
+    }
+});
+
+
 
 // ---------------- Keyboard ----------------
-document.addEventListener('keydown', e => {
-    if (e.key === 'Shift') {
-        snapEnabled = true;
-        multiSelect = true;
-    }
-});
-document.addEventListener('keyup', e => {
-    if (e.key === 'Shift') {
-        snapEnabled = false;
-        multiSelect = false;
-    }
-
-});
-
 document.addEventListener('keydown', e => {
     const active = document.activeElement;
     const typing =
@@ -2367,6 +2464,11 @@ document.addEventListener('keydown', e => {
         active.closest('#dynamicNumberInput') !== null;
 
     if (currentWorkspace === 'tooling') return;
+
+    if (e.key === 'Shift') {
+        snapEnabled = true;
+        multiSelect = true;
+    }
 
     if (e.ctrlKey && e.key.toLowerCase() === 'c') {
         copySelection();
@@ -2453,11 +2555,13 @@ document.addEventListener('keydown', e => {
         // ---- PASS 1: find closest node ----
         selection.nodes.forEach(key => {
             const [p, n] = key.split(':').map(Number);
+
             if (hasStitches(p)) {
                 flag = 1;
             }
             removeStitches(p, flag);
             flag = 0;
+
             const node = doc.getPolyline(p).get(n);
 
             const dx = node.x - mousePos.x;
@@ -2472,9 +2576,13 @@ document.addEventListener('keydown', e => {
 
         if (!closest) return;
 
+        // ✅ KEY FIX: compute offset so closest node lands ON mouse
+        const offsetX = mousePos.x - closest.x;
+        const offsetY = mousePos.y - closest.y;
+
         const nodes = [];
 
-        // ---- PASS 2: compute start positions ----
+        // ---- PASS 2: store starting positions ----
         selection.nodes.forEach(key => {
             const [p, n] = key.split(':').map(Number);
             const node = doc.getPolyline(p).get(n);
@@ -2482,7 +2590,6 @@ document.addEventListener('keydown', e => {
             nodes.push({
                 polyIndex: p,
                 nodeIndex: n,
-
                 startX: node.x,
                 startY: node.y
             });
@@ -2493,7 +2600,15 @@ document.addEventListener('keydown', e => {
         xLock = false;
         yLock = false;
 
-        gOrigin = mousePos;
+        // ✅ CRITICAL: shift origin so transform snaps correctly
+        gOrigin = {
+            x: mousePos.x - offsetX,
+            y: mousePos.y - offsetY
+        };
+
+        // OR simpler (recommended):
+        // store offset directly
+        gOffset = { x: offsetX, y: offsetY };
     }
 
     if (e.key === 'x') xLock = !xLock;
@@ -2689,6 +2804,15 @@ document.addEventListener('keydown', e => {
     }
 });
 
+document.addEventListener('keyup', e => {
+    if (e.key === 'Shift') {
+        snapEnabled = false;
+        multiSelect = false;
+    }
+});
+
+
+
 // ---------------- Input fields ----------------
 inputX.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
@@ -2715,12 +2839,8 @@ inputY.addEventListener('keydown', e => {
 });
 
 
-// ---------------- Buttons ---------------
-const gridSnapButton = document.getElementById('gridSnap');
-const nodesSnapButton = document.getElementById('nodesSnap');
-const guideSnapButton = document.getElementById('guideSnap');
-const autoMergeCheck = document.getElementById('autoMergeCheck');
 
+// ---------------- Buttons ---------------
 autoMergeCheck.onchange = () => {
     autoMergeActive = autoMergeCheck.value;
 };
@@ -2752,117 +2872,21 @@ guideSnapButton.addEventListener("click", () => {
     gridSnapButton.classList.remove('active');
 });
 
-document.getElementById('newFileBtn').onclick = () => {
+newFileButton.onclick = () => {
     ipcRenderer.send('file-new');
     closeSplash();
 };
 
-document.getElementById('openFileBtn').onclick = () => {
+openFileButton.onclick = () => {
     ipcRenderer.invoke('open-pattern-dialog');
     closeSplash();
 };
 
-// ---------------- Delete ----------------
-function deleteSelection() {
-    if (!doc || !ModuleRef) return;
 
-    const newDoc = new ModuleRef.Document();
 
-    for (let i = 0; i < doc.entityCount(); i++) {
-        const poly = doc.getPolyline(i);
-        removeStitches(i);
-
-        // Check which nodes are selected
-        const nodesToKeep = [];
-        for (let j = 0; j < poly.size(); j++) {
-            const key = `${i}:${j}`;
-            if (!selection.nodes.has(key)) {
-                nodesToKeep.push(poly.get(j));
-            }
-        }
-
-        // Only keep polyline if >=2 nodes remain
-        if (nodesToKeep.length >= 2) {
-            const id = newDoc.createPolyline();
-            for (let n of nodesToKeep) {
-                newDoc.addNodeToPolyline(id, n.x, n.y);
-            }
-        }
-    }
-
-    // Clear selection
-    clearSelection();
-
-    // Replace doc
-    doc = newDoc;
-    if (!doc.guides) doc.guides = [];
-
-    drawAll();
-}
-
-// -------------- File Ops --------------
-// Load a .pattern file
-function loadPattern(file) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        try {
-            const json = JSON.parse(e.target.result);
-
-            // Reset doc
-            doc = new ModuleRef.Document();
-            clearSelection();
-            cancelPolyline();
-            if (!doc.guides) doc.guides = [];
-
-            // Load entities
-            json.entities.forEach(ent => {
-                if (ent.type === 'polyline') {
-                    const id = doc.createPolyline();
-                    ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
-                } else if (ent.type === 'rectangle') {
-                    const id = doc.createPolyline();
-                    const { start, end } = ent;
-                    doc.addNodeToPolyline(id, start.x, start.y);
-                    doc.addNodeToPolyline(id, end.x, start.y);
-                    doc.addNodeToPolyline(id, end.x, end.y);
-                    doc.addNodeToPolyline(id, start.x, end.y);
-                    doc.addNodeToPolyline(id, start.x, start.y);
-                } else if (ent.type === 'circle') {
-                    const id = doc.createPolyline();
-                    const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
-                    pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
-                }
-            });
-            // Load guides
-            if (json.guides) {
-                json.guides.forEach(g => {
-                    doc.addGuide(g.vertical, g.pos);
-                });
-            }
-
-            drawAll();
-        } catch (err) {
-            console.error('Error loading pattern:', err);
-            alert('Failed to load pattern file.');
-        }
-    };
-    reader.readAsText(file);
-}
-
-// ---------------- TOOLING ----------------
-
-function resizeToolingCanvas() {
-    const canvas = document.getElementById("toolingCanvas");
-    const rect = canvas.getBoundingClientRect();
-
-    // Set actual pixel width & height
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-
-    // Scale the context so drawing stays correct
-    const ctx = canvas.getContext("2d");
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-}
+// =====================================================
+// 4. TOOLING SYSTEM
+// =====================================================
 
 // Call once on load
 window.addEventListener("load", resizeToolingCanvas);
@@ -2876,8 +2900,9 @@ ToolingModule().then((Module) => {
     ToolingReady = true;
 });
 
-// ---------------- POINTER EVENTS ----------------
 
+
+// ---------------- POINTER EVENTS ----------------
 toolingCanvas.addEventListener("pointerdown", (e) => {
     if (!ToolingReady) return;
     isDrawing = true;
@@ -2928,8 +2953,9 @@ toolingCanvas.addEventListener("pointerup", () => {
     redrawToolingCanvas();
 });
 
-// ---------------- CLEAR / SIMPLIFY ----------------
 
+
+// ---------------- CLEAR / SIMPLIFY ----------------
 document.getElementById("clearCanvasBtn").addEventListener("click", () => {
     if (!ToolingReady) return;
 
@@ -2949,8 +2975,9 @@ document.getElementById("enableSimplify").addEventListener("change", (e) => {
     simplify = e.target.checked;
 });
 
-// ---------------- DRAWING ----------------
 
+
+// ---------------- Helpers ----------------
 function redrawToolingCanvas() {
     if (!ToolingReady) return;
 
@@ -2975,6 +3002,75 @@ function redrawToolingCanvas() {
     // Optional: free buffer in C++
     ToolingRef.ccall("free_lines_buffer");
 }
+
+function resizeToolingCanvas() {
+    const canvas = document.getElementById("toolingCanvas");
+    const rect = canvas.getBoundingClientRect();
+
+    // Set actual pixel width & height
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+
+    // Scale the context so drawing stays correct
+    const ctx = canvas.getContext("2d");
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+
+function pushStroke(stroke) {
+    toolingUndoStack.push(stroke);
+    toolingRedoStack.length = 0; // clear redo on new action
+
+    // Add to WASM
+    addStrokeToWASM(stroke);
+}
+
+function addStrokeToWASM(stroke) {
+    if (!ToolingReady) return;
+    let pts = new Float64Array(stroke.length * 2);
+    stroke.forEach((p, i) => {
+        pts[i * 2] = p.x;
+        pts[i * 2 + 1] = p.y;
+    });
+
+    let ptr = ToolingRef._malloc(pts.length * pts.BYTES_PER_ELEMENT);
+    ToolingRef.HEAPF64.set(pts, ptr / 8);
+    ToolingRef.ccall("process_stroke", "void", ["number", "number"], [ptr, pts.length]);
+    // no _free needed
+}
+
+function toolingUndo() {
+    if (!toolingUndoStack.length) return;
+    const stroke = toolingUndoStack.pop();
+    toolingRedoStack.push(stroke);
+
+    if (stroke.type === "clear") {
+        // restore previous lines in WASM
+        ToolingRef.ccall("clear_scene");
+        const linesArray = stroke.lines;
+        for (let i = 0; i < linesArray.length; i += 4) {
+            const p1 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i], linesArray[i + 1]]);
+            const p2 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i + 2], linesArray[i + 3]]);
+            ToolingRef.ccall("create_line", "number", ["number", "number"], [p1, p2]);
+        }
+    }
+
+    redrawToolingCanvas();
+}
+
+function toolingRedo() {
+    if (!toolingRedoStack.length) return;
+    const stroke = toolingRedoStack.pop();
+    toolingUndoStack.push(stroke);
+
+    // Clear WASM scene
+    ToolingRef.ccall("clear_scene");
+
+    // Re-add all strokes
+    toolingUndoStack.forEach(addStrokeToWASM);
+    redrawToolingCanvas();
+}
+
+
 
 // ---------------- Print ----------------
 document.getElementById("toolingPrint").addEventListener("click", () => {
@@ -3068,64 +3164,11 @@ document.getElementById("toolingPrint").addEventListener("click", () => {
     }, 100);
 });
 
-// ---------------- UNDO / REDO ----------------
 
-let toolingUndoStack = [];
-let toolingRedoStack = [];
 
-function pushStroke(stroke) {
-    toolingUndoStack.push(stroke);
-    toolingRedoStack.length = 0; // clear redo on new action
-
-    // Add to WASM
-    addStrokeToWASM(stroke);
-}
-
-function addStrokeToWASM(stroke) {
-    if (!ToolingReady) return;
-    let pts = new Float64Array(stroke.length * 2);
-    stroke.forEach((p, i) => {
-        pts[i * 2] = p.x;
-        pts[i * 2 + 1] = p.y;
-    });
-
-    let ptr = ToolingRef._malloc(pts.length * pts.BYTES_PER_ELEMENT);
-    ToolingRef.HEAPF64.set(pts, ptr / 8);
-    ToolingRef.ccall("process_stroke", "void", ["number", "number"], [ptr, pts.length]);
-    // no _free needed
-}
-
-function toolingUndo() {
-    if (!toolingUndoStack.length) return;
-    const stroke = toolingUndoStack.pop();
-    toolingRedoStack.push(stroke);
-
-    if (stroke.type === "clear") {
-        // restore previous lines in WASM
-        ToolingRef.ccall("clear_scene");
-        const linesArray = stroke.lines;
-        for (let i = 0; i < linesArray.length; i += 4) {
-            const p1 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i], linesArray[i + 1]]);
-            const p2 = ToolingRef.ccall("create_point", "number", ["number", "number"], [linesArray[i + 2], linesArray[i + 3]]);
-            ToolingRef.ccall("create_line", "number", ["number", "number"], [p1, p2]);
-        }
-    }
-
-    redrawToolingCanvas();
-}
-
-function toolingRedo() {
-    if (!toolingRedoStack.length) return;
-    const stroke = toolingRedoStack.pop();
-    toolingUndoStack.push(stroke);
-
-    // Clear WASM scene
-    ToolingRef.ccall("clear_scene");
-
-    // Re-add all strokes
-    toolingUndoStack.forEach(addStrokeToWASM);
-    redrawToolingCanvas();
-}
+// =====================================================
+// 5. EOF Initialization
+// =====================================================
 
 // ---------------- Init ----------------
 GeometryModule().then(async Module => {
