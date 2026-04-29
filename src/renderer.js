@@ -1,17 +1,11 @@
 // TODO List
 //
-// Add multisheet capability (split pane capability)
-//
-//
 // Squash bugs (continual)
 //
 // Figure out what to add next
 
-
-
 // BUG WATCH
 // no current bugs identified
-
 
 // =====================================================
 // 1. INITIALIZATION
