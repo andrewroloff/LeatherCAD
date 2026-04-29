@@ -12,9 +12,9 @@ LeatherCAD is an open-source leather tooling design application built with Elect
 
 ## Downloads
 
-* [Windows](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.1.0/leathercad-windows-latest.zip)
-* [macOS](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.1.0/leathercad-macos-latest.zip)
-* [Linux](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.1.0/leathercad-ubuntu-latest.zip)
+* [Windows](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.2.0/leathercad-macos-latest.zip)
+* [macOS](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.2.0/leathercad-macos-latest.zip)
+* [Linux](https://github.com/andrewroloff/LeatherCAD/releases/download/v1.2.0/leathercad-ubuntu-latest.zip)
 
 
 ## Manual Build / Installation
