@@ -1,10 +1,16 @@
 // TODO List
 //
-// Add multisheet capability (Tabs, split pane capability, print should print all at once, add to exportPattern)
+// Add multisheet capability (split pane capability)
+//
 //
 // Squash bugs (continual)
 //
 // Figure out what to add next
+
+
+
+// BUG WATCH
+// no current bugs identified
 
 
 // =====================================================
@@ -20,6 +26,11 @@ let doc = null;
 let ModuleRef = null;
 let currentPolyline = [];
 let mousePos = null;
+
+const project = {
+    pages: [],
+    activePage: 0
+}
 
 let startingPosition = null;
 
@@ -77,6 +88,10 @@ const inputY = document.getElementById('inputY');
 const coordContainer = document.getElementById('coordinateInput');
 const newFileButton = document.getElementById('newFileBtn');
 const openFileButton = document.getElementById('openFileBtn');
+const tabBar = document.getElementById('tabBar');
+const newTabBtn = document.getElementById('newTabBtn');
+const toolIndicator = document.getElementById('toolIndicator');
+
 
 let selectedGuideIndex = null;
 let guideDragActive = false;
@@ -110,6 +125,10 @@ let isStitched = false;
 let flag = 0;
 
 let autoMergeActive = false;
+
+let activePageId = 0;
+
+let isDirty = false;
 
 // fit window better
 function resizeWindow() {
@@ -174,13 +193,12 @@ ipcRenderer.on('set-tool', (event, tool) => {
 
 // Print
 ipcRenderer.on('print', async () => {
-    if (!doc) return;
+    if (!project || !project.pages || !ModuleRef) return;
 
-    // Get current page settings
     const settings = await ipcRenderer.invoke('get-settings');
 
-    // Page dimensions in pixels
-    let pageWidthPx = 8.5 * PPU;   // default letter
+    // ---- PAGE SIZE ----
+    let pageWidthPx = 8.5 * PPU;
     let pageHeightPx = 11 * PPU;
 
     if (settings.page.type === 'a4') {
@@ -191,44 +209,106 @@ ipcRenderer.on('print', async () => {
         pageHeightPx = settings.page.height * PPU;
     }
 
-    // Create canvas matching page size
-    const printCanvas = document.createElement('canvas');
-    printCanvas.width = pageWidthPx;
-    printCanvas.height = pageHeightPx;
-    const printCtx = printCanvas.getContext('2d');
-
-    // Fill white background
-    printCtx.fillStyle = '#fff';
-    printCtx.fillRect(0, 0, printCanvas.width, printCanvas.height);
-
-    // Draw entities exactly in document coordinates (no scaling)
-    drawEntitiesOnCtx(printCtx);
-    drawOverlayOnCtx(printCtx);
-
-    // Open print window
-    const dataUrl = printCanvas.toDataURL();
     const printWindow = window.open('', '_blank');
-
     printWindow.document.open();
+
+    const pagesHTML = [];
+
+    // ---- RENDER EACH PAGE IN ISOLATION ----
+    for (const page of project.pages) {
+
+        // create isolated temp doc PER PAGE
+        const tempDoc = new ModuleRef.Document();
+        if (!tempDoc.guides) tempDoc.guides = [];
+
+        // ---- load page data ONLY ----
+        (page.entities || []).forEach(ent => {
+            if (ent.type === 'polyline') {
+                const id = tempDoc.createPolyline();
+                ent.nodes.forEach(n => tempDoc.addNodeToPolyline(id, n.x, n.y));
+            }
+            else if (ent.type === 'rectangle') {
+                const id = tempDoc.createPolyline();
+                const { start, end } = ent;
+
+                tempDoc.addNodeToPolyline(id, start.x, start.y);
+                tempDoc.addNodeToPolyline(id, end.x, start.y);
+                tempDoc.addNodeToPolyline(id, end.x, end.y);
+                tempDoc.addNodeToPolyline(id, start.x, end.y);
+                tempDoc.addNodeToPolyline(id, start.x, start.y);
+            }
+            else if (ent.type === 'circle') {
+                const id = tempDoc.createPolyline();
+                const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
+                pts.forEach(p => tempDoc.addNodeToPolyline(id, p.x, p.y));
+            }
+        });
+
+        (page.guides || []).forEach(g => {
+            tempDoc.addGuide(g.vertical, g.pos);
+        });
+
+        // ---- RENDER ISOLATED CANVAS ----
+        const canvas = document.createElement('canvas');
+        canvas.width = pageWidthPx;
+        canvas.height = pageHeightPx;
+
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // IMPORTANT: renderer must ONLY use tempDoc
+        const oldDoc = doc;
+        doc = tempDoc;
+
+        drawEntitiesOnCtx(ctx);
+        drawOverlayOnCtx(ctx);
+
+        doc = oldDoc;
+
+        pagesHTML.push(`
+            <div class="page">
+                <img src="${canvas.toDataURL()}">
+            </div>
+        `);
+    }
+
+    // ---- PRINT DOCUMENT ----
     printWindow.document.write(`
         <html>
         <head>
             <title>Print</title>
             <style>
-                @page { size: ${settings.page.type === 'a4' ? 'A4' : 'letter'}; margin: 0; }
-                body { margin: 0; padding: 0; }
+                @page {
+                    size: ${settings.page.type === 'a4' ? 'A4' : 'letter'};
+                    margin: 0;
+                }
+                body {
+                    margin: 0;
+                    padding: 0;
+                }
+                .page {
+                    page-break-after: always;
+                }
                 img {
+                    width: 100%;
                     display: block;
-                    width: auto;
-                    height: auto;
                 }
             </style>
         </head>
         <body>
-            <img src="${dataUrl}" onload="window.focus(); window.print();">
+            ${pagesHTML.join('')}
+            <script>
+                window.onload = () => {
+                    window.focus();
+                    window.print();
+                };
+            </script>
         </body>
         </html>
     `);
+
     printWindow.document.close();
 });
 
@@ -282,13 +362,23 @@ function drawOverlayOnCtx(ctxRef) {
     }
 }
 
-// File operations (stubs for now)
+// File operations
 ipcRenderer.on('file-new', () => {
     if (!ModuleRef) return;
+    document.title = "LeatherCAD";
     doc = new ModuleRef.Document();
     if (!doc.guides) doc.guides = [];
+
     clearSelection();
     cancelPolyline();
+
+    project.pages = [{
+        id: 0,
+        doc: doc
+    }];
+    clearTabs();
+    setActiveTab(newTab(0));
+
     drawAll();
 });
 
@@ -297,37 +387,98 @@ ipcRenderer.on('open-pattern', (event, filePath) => {
         const text = fs.readFileSync(filePath, 'utf-8');
         const json = JSON.parse(text);
 
-        // Reset doc
+        document.title = "LeatherCAD - " + filePath;
+
+        if (!ModuleRef) return;
+
+        // ---- RESET ACTIVE DOC ----
         doc = new ModuleRef.Document();
         if (!doc.guides) doc.guides = [];
+
         clearSelection();
         cancelPolyline();
 
-        // Load entities
-        json.entities.forEach(ent => {
-            if (ent.type === 'polyline') {
-                const id = doc.createPolyline();
-                ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
-            }
-            else if (ent.type === 'rectangle') {
-                const id = doc.createPolyline();
-                const { start, end } = ent;
+        // ---- NORMALIZE INPUT ----
+        const pages = json.project?.pages || [{
+            id: 0,
+            entities: json.entities || [],
+            guides: json.guides || [],
+            stitchingPatterns: json.stitchingPatterns || []
+        }];
 
-                doc.addNodeToPolyline(id, start.x, start.y);
-                doc.addNodeToPolyline(id, end.x, start.y);
-                doc.addNodeToPolyline(id, end.x, end.y);
-                doc.addNodeToPolyline(id, start.x, end.y);
-                doc.addNodeToPolyline(id, start.x, start.y);
-            }
-            else if (ent.type === 'circle') {
-                const id = doc.createPolyline();
-                const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
-                pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
-            }
+        // ---- RESET PROJECT + UI ----
+        project.pages = [];
+        clearTabs();
+
+        // ---- BUILD PAGES + TABS ----
+        pages.forEach((page, i) => {
+            const pageObj = {
+                id: i,
+                entities: page.entities || [],
+                guides: page.guides || [],
+                stitchingPatterns: page.stitchingPatterns || [],
+                undoStack: page.undoStack || [],
+                redoStack: page.redoStack || []
+            };
+
+            project.pages.push(pageObj);
+
+            newTab(i); // link UI → page
         });
+
+        // ---- LOAD FIRST PAGE INTO DOC ----
+        activePageId = 0;
+
+        const firstPage = project.pages[0];
+
+        if (firstPage) {
+            // load entities
+            (firstPage.entities || []).forEach(ent => {
+                if (ent.type === 'polyline') {
+                    const id = doc.createPolyline();
+                    ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
+                }
+                else if (ent.type === 'rectangle') {
+                    const id = doc.createPolyline();
+                    const { start, end } = ent;
+
+                    doc.addNodeToPolyline(id, start.x, start.y);
+                    doc.addNodeToPolyline(id, end.x, start.y);
+                    doc.addNodeToPolyline(id, end.x, end.y);
+                    doc.addNodeToPolyline(id, start.x, end.y);
+                    doc.addNodeToPolyline(id, start.x, start.y);
+                }
+                else if (ent.type === 'circle') {
+                    const id = doc.createPolyline();
+                    const pts = generateCirclePoints(
+                        ent.center.x,
+                        ent.center.y,
+                        ent.radius,
+                        32
+                    );
+                    pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
+                }
+            });
+
+            // load guides
+            (firstPage.guides || []).forEach(g => {
+                doc.addGuide(g.vertical, g.pos);
+            });
+
+            // load stitching
+            stitchingPatterns = firstPage.stitchingPatterns || [];
+        }
+
+        // ---- SET ACTIVE TAB UI ----
+        document.querySelectorAll(".tab").forEach(tab => {
+            tab.classList.toggle(
+                "active",
+                Number(tab.dataset.pageId) === 0
+            );
+        });
+
         saveState();
         drawAll();
-
 
     } catch (err) {
         console.error('Failed to open pattern:', err);
@@ -340,6 +491,7 @@ ipcRenderer.on('save-pattern-as', (event, filePath) => {
     try {
         const data = exportPattern();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        markClean();
     } catch (err) {
         console.error('Save failed:', err);
     }
@@ -347,7 +499,7 @@ ipcRenderer.on('save-pattern-as', (event, filePath) => {
 
 // About dialog
 ipcRenderer.on('about', () => {
-    alert('CAD App v1.0 - Electron');
+    alert('LeatherCAD App v1.1.0');
 });
 
 const prefsModal = document.getElementById('preferencesModal');
@@ -459,7 +611,6 @@ const toolIcons = {
     measure: '../assets/icons/measure.svg'
 };
 
-const toolIndicator = document.getElementById('toolIndicator');
 
 
 
@@ -480,54 +631,149 @@ let unresolvedStitches = false;
 // =====================================================
 // 2. HELPERS
 // =====================================================
+function markDirty() {
+    isDirty = true;
+    updateSaveIndicator();
+}
+
+function markClean() {
+    isDirty = false;
+    updateSaveIndicator();
+}
+
+function updateSaveIndicator() {
+    const el = document.getElementById("saveStatus");
+    if (!el) return;
+
+    if (isDirty) {
+        el.textContent = "● Unsaved";
+        el.classList.add("dirty");
+        el.classList.remove("clean");
+    } else {
+        el.textContent = "Saved";
+        el.classList.add("clean");
+        el.classList.remove("dirty");
+    }
+}
+
+function normalizeProject(json) {
+    const pagesRaw = json.project?.pages || [{
+        entities: json.entities || [],
+        guides: json.guides || [],
+        stitchingPatterns: json.stitchingPatterns || []
+    }];
+
+    const pages = pagesRaw.map((p, i) => ({
+        id: Number.isFinite(Number(p.id)) ? Number(p.id) : i,
+        entities: p.entities ?? [],
+        guides: p.guides ?? [],
+        stitchingPatterns: p.stitchingPatterns ?? []
+    }));
+
+    // sort by numeric id to guarantee order
+    pages.sort((a, b) => a.id - b.id);
+
+    // reindex to ensure strict 0..n-1 continuity
+    return {
+        pages: pages.map((p, i) => ({
+            ...p,
+            id: i
+        }))
+    };
+}
+
 // -------------- File Ops --------------
 // Load a .pattern file
 function loadPattern(file) {
     const reader = new FileReader();
+
     reader.onload = function (e) {
         try {
             const json = JSON.parse(e.target.result);
 
-            // Reset doc
             doc = new ModuleRef.Document();
             clearSelection();
             cancelPolyline();
-            if (!doc.guides) doc.guides = [];
 
-            // Load entities
-            json.entities.forEach(ent => {
-                if (ent.type === 'polyline') {
-                    const id = doc.createPolyline();
-                    ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
-                } else if (ent.type === 'rectangle') {
-                    const id = doc.createPolyline();
-                    const { start, end } = ent;
-                    doc.addNodeToPolyline(id, start.x, start.y);
-                    doc.addNodeToPolyline(id, end.x, start.y);
-                    doc.addNodeToPolyline(id, end.x, end.y);
-                    doc.addNodeToPolyline(id, start.x, end.y);
-                    doc.addNodeToPolyline(id, start.x, start.y);
-                } else if (ent.type === 'circle') {
-                    const id = doc.createPolyline();
-                    const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
-                    pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
-                }
-            });
-            // Load guides
-            if (json.guides) {
-                json.guides.forEach(g => {
+            project.pages = normalizeProject(json);
+            clearTabs();
+            project.pages.forEach(page => {
+                newTab(page.id); // id = 0,1,2,...
+
+                page.entities.forEach(ent => createEntity(ent));
+
+                page.guides.forEach(g => {
                     doc.addGuide(g.vertical, g.pos);
                 });
-            }
+
+                page.stitchingPatterns.forEach(sp => {
+                    stitchingPatterns.push(sp);
+                });
+            });
 
             drawAll();
+
         } catch (err) {
-            console.error('Error loading pattern:', err);
-            alert('Failed to load pattern file.');
+            console.error("Error loading pattern:", err);
+            alert("Failed to load pattern file.");
         }
     };
+
     reader.readAsText(file);
 }
+
+// new tab
+function newTab(id) {
+    const tab = document.createElement("div");
+    tab.classList.add("tab");
+    tab.textContent = `Page ${id + 1}`;
+
+    tab.dataset.pageId = id;
+
+    tab.onclick = () => setActiveTab(tab);
+
+    if (id > 0) {
+        const closeBtn = document.createElement("span");
+        closeBtn.textContent = "✕";
+        closeBtn.classList.add("tab-close");
+
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            deleteTab(id);
+        };
+
+        tab.appendChild(closeBtn);
+    }
+    tabBar.appendChild(tab);
+    tabBar.appendChild(newTabBtn);
+
+    return tab;
+}
+
+function setActiveTab(activeTab) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    activeTab.classList.add("active");
+    loadTab(activeTab);
+}
+
+function clearTabs() {
+    document.querySelectorAll(".tab").forEach(tab => tab.remove());
+}
+
+function deleteTab(id) {
+    const tab = document.querySelector(`.tab[data-page-id="${id}"]`);
+    tab.remove();
+    project.pages.splice(id, 1);
+}
+
+newTabBtn.addEventListener("click", () => {
+    syncActivePageToProject();
+    const tab = newTab(project.pages.length)
+    setActiveTab(tab);
+    addTabToPages(tab);
+    loadTab(tab);
+});
+
 
 // ---------------- Delete ----------------
 function deleteSelection() {
@@ -1093,7 +1339,7 @@ async function applySettings() {
 async function loadRecentFiles() {
     const files = await ipcRenderer.invoke('get-recent-files');
     const list = document.getElementById('recentList');
-
+    if (files.length > 3) files.length = 3;
     list.innerHTML = '';
 
     files.forEach(path => {
@@ -1206,6 +1452,8 @@ function saveState() {
 
     const snapshot = JSON.stringify(exportPattern());
 
+    if (!project.pages[activePageId].undoStack) project.pages[activePageId].undoStack = [];
+    const undoStack = project.pages[activePageId].undoStack;
     undoStack.push(snapshot);
 
     if (undoStack.length > UNDO_LIMIT) {
@@ -1213,45 +1461,49 @@ function saveState() {
     }
 
     // once you do a new action, redo history is invalid
-    redoStack = [];
+    project.pages[activePageId].redoStack = [];
+    syncActivePageToProject();
 }
 
 function loadState(snapshot) {
     const json = JSON.parse(snapshot);
-
+    page = json.project.pages[activePageId];
     doc = new ModuleRef.Document();
     if (!doc.guides) doc.guides = [];
-    json.entities.forEach(ent => {
+    page.entities.forEach(ent => {
         if (ent.type === 'polyline') {
             const id = doc.createPolyline();
             ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
         }
     });
     stitchingPatterns = [];
-    json.stitchingPatterns.forEach(pat => {
+    page.stitchingPatterns.forEach(pat => {
         stitchingPatterns.push(pat);
 
         drawStitches();
     });
 
     drawAll();
+    syncActivePageToProject();
 }
 
 function undo() {
+    undoStack = project.pages[activePageId].undoStack;
     if (undoStack.length === 0) return;
 
     const current = JSON.stringify(exportPattern());
-    redoStack.push(current);
+    project.pages[activePageId].redoStack.push(current);
 
     const prev = undoStack.pop();
     loadState(prev);
 }
 
 function redo() {
+    redoStack = project.pages[activePageId].redoStack;
     if (redoStack.length === 0) return;
 
     const current = JSON.stringify(exportPattern());
-    undoStack.push(current);
+    project.pages[activePageId].undoStack.push(current);
 
     const next = redoStack.pop();
     loadState(next);
@@ -1328,20 +1580,75 @@ function computeFillet(A, B, C, radius, segments = 8) {
 }
 
 function exportPattern() {
-    if (!doc) return {};
+    if (!doc || !project) return {};
 
-    const data = {
+    // ---- SYNC ACTIVE PAGE INTO DATA ----
+    if (project.pages && project.pages[activePageId]) {
+        const page = project.pages[activePageId];
+
+        page.entities = [];
+
+        for (let i = 0; i < doc.entityCount(); i++) {
+            const poly = doc.getPolyline(i);
+
+            const nodes = [];
+            for (let j = 0; j < poly.size(); j++) {
+                const n = poly.get(j);
+                nodes.push({ x: n.x, y: n.y });
+            }
+
+            page.entities.push({
+                type: 'polyline',
+                nodes
+            });
+        }
+
+        page.guides = [];
+
+        for (let i = 0; i < doc.guideCount(); i++) {
+            const g = doc.getGuide(i);
+            page.guides.push({
+                vertical: g.vertical,
+                pos: g.pos
+            });
+        }
+
+        page.stitchingPatterns = stitchingPatterns;
+    }
+
+    // ---- BUILD EXPORT FROM PAGES ----
+    const pages = project.pages.map(p => ({
+        id: p.id,
+        entities: p.entities || [],
+        guides: p.guides || [],
+        stitchingPatterns: p.stitchingPatterns || []
+    }));
+
+    return {
         docSetup: {
             units: 'inches',
             pageWidth: 8.5,
             pageHeight: 11,
             PPU: PPU
         },
-        entities: [],
-        guides: [],
-        stitchingPatterns: []
+        project: {
+            pages
+        }
     };
+}
 
+function syncActivePageToProject() {
+    if (!project || !project.pages) return;
+    if (!project.pages[activePageId]) {
+        project.pages.push({
+            id: activePageId
+        });
+    };
+    if (!doc) return;
+
+    const page = project.pages[activePageId];
+    // ---- ENTITIES ----
+    page.entities = [];
 
     for (let i = 0; i < doc.entityCount(); i++) {
         const poly = doc.getPolyline(i);
@@ -1352,23 +1659,86 @@ function exportPattern() {
             nodes.push({ x: n.x, y: n.y });
         }
 
-        data.entities.push({
+        page.entities.push({
             type: 'polyline',
             nodes
         });
     }
 
+    // ---- GUIDES ----
+    page.guides = [];
+
     for (let i = 0; i < doc.guideCount(); i++) {
         const g = doc.getGuide(i);
-        data.guides.push({
+        page.guides.push({
             vertical: g.vertical,
             pos: g.pos
         });
     }
 
-    data.stitchingPatterns = stitchingPatterns;
+    // ---- STITCHING ----
+    page.stitchingPatterns = stitchingPatterns;
+}
 
-    return data;
+function addTabToPages(tab) {
+    project.pages.push({
+        id: tab.dataset.pageId,
+        entities: [],
+        guides: [],
+        stitchingPatterns: []
+    });
+}
+
+function loadTab(tab) {
+    if (!project || !project.pages) return;
+    if (!ModuleRef || !doc) return;
+
+    const pageId = Number(tab.dataset.pageId);
+    const page = project.pages[pageId];
+    if (!page) return;
+
+    // ---- SET ACTIVE PAGE ----
+    activePageId = pageId;
+
+    // ---- CLEAR CURRENT CANVAS ----
+    doc = new ModuleRef.Document();
+    if (!doc.guides) doc.guides = [];
+
+    clearSelection();
+    cancelPolyline();
+
+    // ---- LOAD ENTITIES ----
+    (page.entities || []).forEach(ent => {
+        if (ent.type === 'polyline') {
+            const id = doc.createPolyline();
+            ent.nodes.forEach(n => doc.addNodeToPolyline(id, n.x, n.y));
+        }
+        else if (ent.type === 'rectangle') {
+            const id = doc.createPolyline();
+            const { start, end } = ent;
+
+            doc.addNodeToPolyline(id, start.x, start.y);
+            doc.addNodeToPolyline(id, end.x, start.y);
+            doc.addNodeToPolyline(id, end.x, end.y);
+            doc.addNodeToPolyline(id, start.x, end.y);
+            doc.addNodeToPolyline(id, start.x, start.y);
+        }
+        else if (ent.type === 'circle') {
+            const id = doc.createPolyline();
+            const pts = generateCirclePoints(ent.center.x, ent.center.y, ent.radius, 32);
+            pts.forEach(p => doc.addNodeToPolyline(id, p.x, p.y));
+        }
+    });
+
+    // ---- LOAD GUIDES ----
+    (page.guides || []).forEach(g => {
+        doc.addGuide(g.vertical, g.pos);
+    });
+
+    // ---- LOAD STITCHING ----
+    stitchingPatterns = page.stitchingPatterns || [];
+
+    drawAll();
 }
 
 function nodeKey(p, n) {
@@ -2169,6 +2539,8 @@ canvas.addEventListener('mousedown', e => {
 
     mousePos = getMousePos(e);
 
+    markDirty();
+
     if (checkGuideSelect(mousePos) && currentTool === 'select') {
         const guide = doc.getGuide(selectedGuideIndex);
         showDynamicInput(guide.vertical ? 'vGuide' : 'hGuide', guide);
@@ -2464,6 +2836,8 @@ document.addEventListener('keydown', e => {
         active.closest('#dynamicNumberInput') !== null;
 
     if (currentWorkspace === 'tooling') return;
+
+    markDirty();
 
     if (e.key === 'Shift') {
         snapEnabled = true;
@@ -2777,6 +3151,10 @@ document.addEventListener('keydown', e => {
         return;
     }
 
+    if (!typing && e.ctrlKey && e.key.toLowerCase() === 'n') {
+        return; // new file node tool fix
+    }
+
     // ----- Tool hotkeys -----
     if (!typing) {
         switch (e.key.toLowerCase()) {
@@ -2787,6 +3165,7 @@ document.addEventListener('keydown', e => {
             case 'n': currentTool = 'node'; break;
         }
         updateToolIndicator();
+        cancelPolyline();
     }
 
     const isNumberKey =
@@ -3178,6 +3557,9 @@ GeometryModule().then(async Module => {
 
     await applySettings();
     drawAll();
+    clearTabs();
+    setActiveTab(newTab(0));
+    syncActivePageToProject();
 });
 
 window.addEventListener('DOMContentLoaded', () => {

@@ -51,6 +51,43 @@ body.dark-mode .workspace {
   background: var(--bg-dark);
 }
 
+/* ------------------- Save Indicator -------------- */
+
+#saveStatus {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+
+  padding: 4px 10px;
+  border-radius: 6px;
+
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text-light);
+
+  border: 1px solid rgba(255, 182, 86, 0.15);
+  backdrop-filter: blur(6px);
+
+  user-select: none;
+
+  transition: all 0.2s ease;
+}
+
+#saveStatus.dirty {
+  color: var(--accent-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(245, 144, 12, 0.25);
+}
+
+#saveStatus.clean {
+  color: #7CFC90;
+  border-color: rgba(124, 252, 144, 0.25);
+  box-shadow: none;
+}
+
 /* -------------------- Tab Bar -------------------- */
 #tabBar {
   display: flex;
@@ -169,7 +206,7 @@ body.dark-mode button:active {
 #snapMenu,
 #autoMergeDiv {
   position: absolute;
-  top: 2% !important;
+  top: 5% !important;
   left: 1%;
   display: flex;
   gap: 6px;
@@ -182,7 +219,7 @@ body.dark-mode button:active {
 }
 
 #autoMergeDiv {
-  top: 6% !important;
+  top: 9% !important;
   left: 4% !important;
 }
 
@@ -223,7 +260,7 @@ body.dark-mode #snapMenu button:hover {
 /* -------------------- Tool Indicator -------------------- */
 #toolIndicator {
   position: absolute;
-  top: 6% !important;
+  top: 9% !important;
   left: 1%;
   width: 46px;
   height: 46px;
@@ -419,7 +456,7 @@ body.dark-mode .icon {
 }
 
 .tab {
-  padding: 10px;
+  padding: 10px 5px;
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.2s;
@@ -431,6 +468,30 @@ body.dark-mode .icon {
 
 .tab.active {
   background: #444;
+}
+
+#newTabBtn {
+  padding: 0px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+#newTabBtn:hover {
+  background: #555;
+}
+
+.tab-close {
+  font-size: 12px;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-right: 0;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  color: red;
 }
 
 .prefs-content {
@@ -867,4 +928,78 @@ body.dark-mode #toolingCanvas {
   --text-light: #e0f7ff;
   --accent-dark: #ff00c8;
   --canvas-bg-dark: #05070f;
+}
+
+/* Base tab */
+.tab {
+  position: relative;
+  padding: 6px 14px;
+  margin-right: 4px;
+
+  background: var(--panel-dark);
+  color: var(--text-light);
+
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+/* Hover */
+.tab:hover {
+  background: #444;
+  /* slightly lighter than panel-dark */
+  color: white;
+}
+
+/* Active tab */
+.tab.active {
+  background: var(--canvas-bg-dark);
+  color: white;
+  z-index: 2;
+}
+
+/* Blend active tab into content */
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 100%;
+  height: 2px;
+  background: var(--canvas-bg-dark);
+}
+
+/* Subtle separators between inactive tabs */
+.tab:not(.active)::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: 6px;
+  width: 1px;
+  height: 60%;
+  background: var(--shadow-medium);
+}
+
+.tab .close {
+  margin-left: 8px;
+  opacity: 0.6;
+  color: var(--text-light);
+}
+
+.tab .close:hover {
+  opacity: 1;
+  color: var(--accent-hover);
+}
+
+.tab.active {
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    0 2px 4px var(--shadow-light);
 }
